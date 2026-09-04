@@ -3,6 +3,7 @@
 import sys
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from api.disruptions import router as disruptions_router
 
@@ -25,6 +26,9 @@ def health_check() -> dict[str, str]:
     """Return a minimal readiness response."""
 
     return {"status": "ok", "track_id": "PS08"}
+
+
+app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
 
 
 if __name__ == "__main__":

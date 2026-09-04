@@ -9,6 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from gemini.errors import GeminiExtractionError
 from gemini.extraction import extract_understanding
 from gemini.models import DisruptionUnderstanding
+from matching.engine import match_understanding
+from matching.models import MatchingResponse
+from services.data_loader import load_sample_data
 
 
 MAX_DESCRIPTION_LENGTH = 5_000
@@ -43,6 +46,7 @@ class DisruptionUnderstandingResponse(BaseModel):
 
 router = APIRouter(prefix="/api/disruptions", tags=["disruptions"])
 _disruptions: dict[str, DisruptionNoticeResponse] = {}
+_understandings: dict[str, DisruptionUnderstanding] = {}
 
 
 def normalize_description(description: str) -> str:
@@ -55,6 +59,7 @@ def clear_disruptions() -> None:
     """Clear local records for isolated tests and local development."""
 
     _disruptions.clear()
+    _understandings.clear()
 
 
 @router.post("", response_model=DisruptionNoticeResponse, status_code=status.HTTP_201_CREATED)
@@ -98,8 +103,21 @@ def understand_disruption(disruption_id: str) -> DisruptionUnderstandingResponse
         understanding = extract_understanding(record.original_description)
     except GeminiExtractionError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
+    _understandings[disruption_id] = understanding
     return DisruptionUnderstandingResponse(
         disruption_id=record.disruption_id,
         original_description=record.original_description,
         understanding=understanding,
     )
+
+
+@router.post("/{disruption_id}/matches", response_model=MatchingResponse)
+def match_disruption(disruption_id: str) -> MatchingResponse:
+    """Map a previously understood notice to deterministic supply-chain records."""
+
+    if disruption_id not in _disruptions:
+        raise HTTPException(status_code=404, detail=f"Disruption not found: {disruption_id}")
+    understanding = _understandings.get(disruption_id)
+    if understanding is None:
+        raise HTTPException(status_code=409, detail="Disruption understanding is not available")
+    return match_understanding(disruption_id, understanding, load_sample_data())
