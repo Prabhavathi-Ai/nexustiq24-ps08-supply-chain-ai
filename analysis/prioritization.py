@@ -5,6 +5,7 @@ from datetime import date
 from models import SupplyChainData
 
 from .models import (
+        EvidenceReference,
     ImpactResponse,
     InventoryShortage,
     PrioritizedOrder,
@@ -117,6 +118,27 @@ def prioritize_orders(
         customer = customers.get(order.customer_id)
         reasons: list[str] = ["Impact: the order is connected to the matched supply-chain path."]
         evidence = [f"Order {order.id} came from source record {impact_record.source_record} with fact {impact_record.supporting_fact}."]
+        evidence_references = list(impact_record.evidence_references)
+        evidence_references.extend([
+            EvidenceReference(
+                evidence_id=f"prioritization:order:{order.id}:required-date",
+                entity_type="order", record_id=order.id, field="required_date",
+                value=str(order.required_date), relationship="priority input",
+                source_stage="prioritization",
+            ),
+            EvidenceReference(
+                evidence_id=f"prioritization:order:{order.id}:priority",
+                entity_type="order", record_id=order.id, field="priority",
+                value=order.priority, relationship="priority input",
+                source_stage="prioritization",
+            ),
+            EvidenceReference(
+                evidence_id=f"prioritization:order:{order.id}:status",
+                entity_type="order", record_id=order.id, field="status",
+                value=order.status, relationship="priority input",
+                source_stage="prioritization",
+            ),
+        ])
         insufficient: list[str] = []
         score = _date_points(order.required_date, disruption_report_date, reasons)
         score += _priority_points(order.priority, reasons)
@@ -165,6 +187,7 @@ def prioritize_orders(
             evidence=evidence,
             inventory_shortage=shortage,
             insufficient_information=insufficient,
+                    evidence_references=evidence_references,
         ))
 
     prioritized.sort(key=lambda order: (-order.priority_score, order.order_id))

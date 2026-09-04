@@ -1,6 +1,7 @@
 """Deterministic, human-in-the-loop action options for disruption response."""
 
 from .models import ActionOption, ActionPlanResponse, ImpactResponse, PrioritizationResponse
+from .models import ActionOption, ActionPlanResponse, EvidenceReference, ImpactResponse, PrioritizationResponse
 
 
 def build_action_plan(
@@ -23,6 +24,7 @@ def build_action_plan(
     order_ids = [order.order_id for order in priorities.orders]
     top_order = priorities.orders[0] if priorities.orders else None
     evidence = list(top_order.evidence) if top_order else []
+    evidence_references = list(top_order.evidence_references) if top_order else []
     why = list(top_order.reasons) if top_order else []
     options: list[ActionOption] = []
 
@@ -37,6 +39,7 @@ def build_action_plan(
             prerequisites=["Operator confirmation of the business priority is required."],
             evidence=evidence,
             affected_order_ids=order_ids,
+                evidence_references=evidence_references,
         ))
 
     missing_inventory = [
@@ -62,6 +65,7 @@ def build_action_plan(
             prerequisites=["Verify current shipment and route status with the responsible operator."],
             evidence=shipment_evidence,
             affected_order_ids=order_ids,
+            evidence_references=[reference for item in matched_shipments for reference in item.evidence_references],
         ))
 
     shortage_orders = [order for order in priorities.orders if order.inventory_shortage and order.inventory_shortage.shortage_quantity > 0]
@@ -78,6 +82,7 @@ def build_action_plan(
             prerequisites=["Confirm current stock and allocation policy with the operator."],
             evidence=shortage_evidence,
             affected_order_ids=shortage_ids,
+                evidence_references=[reference for order in shortage_orders for reference in order.evidence_references],
         ))
 
     if not options:
@@ -96,6 +101,7 @@ def build_action_plan(
         why=why,
         options=options,
         evidence=evidence,
+        evidence_references=evidence_references,
         operator_decision_required=decision_notice,
         warnings=list(priorities.warnings),
     )

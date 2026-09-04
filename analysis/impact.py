@@ -6,6 +6,7 @@ from matching.models import MatchCandidate, MatchingResponse
 from models import SupplyChainData
 
 from .models import ImpactRecord, ImpactResponse
+from .models import EvidenceReference, ImpactRecord, ImpactResponse
 
 
 def _matched_ids(candidates: list[MatchCandidate]) -> set[str]:
@@ -22,6 +23,15 @@ def _record(
     source_record: str,
     supporting_fact: str,
 ) -> ImpactRecord:
+    evidence = EvidenceReference(
+        evidence_id=f"impact:{entity_type}:{entity_id}:{relationship.replace(' ', '-')}",
+        entity_type=entity_type,
+        record_id=source_record,
+        field=relationship,
+        value=supporting_fact,
+        relationship=relationship,
+        source_stage="impact",
+    )
     return ImpactRecord(
         entity_type=entity_type,
         entity_id=entity_id,
@@ -31,6 +41,7 @@ def _record(
         reason=reason,
         source_record=source_record,
         supporting_fact=supporting_fact,
+        evidence_references=[evidence],
     )
 
 
@@ -180,6 +191,11 @@ def analyze_impact(disruption_id: str, matching: MatchingResponse, data: SupplyC
         state = "impact_identified"
 
     evidence = [item.reason for item in [*direct, *downstream, *insufficient]]
+    evidence_references = [
+        reference
+        for item in [*direct, *downstream, *insufficient]
+        for reference in item.evidence_references
+    ]
     warnings = list(matching.warnings)
     if insufficient:
         warnings.append("Some relationship paths could not be established from the available records.")
@@ -192,5 +208,6 @@ def analyze_impact(disruption_id: str, matching: MatchingResponse, data: SupplyC
         downstream_potential_impact=downstream,
         insufficient_information=insufficient,
         evidence=evidence,
+        evidence_references=evidence_references,
         warnings=warnings,
     )

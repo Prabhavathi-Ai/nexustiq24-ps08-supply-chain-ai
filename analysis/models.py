@@ -20,6 +20,18 @@ Urgency = Literal["monitor", "elevated", "urgent"]
 Severity = Literal["low", "medium", "high", "critical"]
 
 
+class EvidenceReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_id: str
+    entity_type: str
+    record_id: str
+    field: str
+    value: str
+    relationship: str
+    source_stage: Literal["understanding", "matching", "impact", "prioritization", "recommendation"]
+
+
 class ImpactRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -31,6 +43,7 @@ class ImpactRecord(BaseModel):
     reason: str
     source_record: str
     supporting_fact: str
+    evidence_references: list[EvidenceReference] = Field(default_factory=list)
 
 
 class ImpactResponse(BaseModel):
@@ -45,6 +58,7 @@ class ImpactResponse(BaseModel):
     insufficient_information: list[ImpactRecord] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    evidence_references: list[EvidenceReference] = Field(default_factory=list)
 
 
 class InventoryShortage(BaseModel):
@@ -68,6 +82,7 @@ class PrioritizedOrder(BaseModel):
     severity: Severity
     reasons: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
+    evidence_references: list[EvidenceReference] = Field(default_factory=list)
     inventory_shortage: InventoryShortage | None = None
     insufficient_information: list[str] = Field(default_factory=list)
 
@@ -91,6 +106,7 @@ class ActionOption(BaseModel):
     prerequisites: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
     affected_order_ids: list[str] = Field(default_factory=list)
+    evidence_references: list[EvidenceReference] = Field(default_factory=list)
 
 
 class ActionPlanResponse(BaseModel):
@@ -102,3 +118,4 @@ class ActionPlanResponse(BaseModel):
     evidence: list[str] = Field(default_factory=list)
     operator_decision_required: str
     warnings: list[str] = Field(default_factory=list)
+    evidence_references: list[EvidenceReference] = Field(default_factory=list)
