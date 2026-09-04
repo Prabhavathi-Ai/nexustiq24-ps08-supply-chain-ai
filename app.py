@@ -4,6 +4,8 @@ import sys
 
 from fastapi import FastAPI
 
+from api.disruptions import router as disruptions_router
+
 
 SUPPORTED_PYTHON = (3, 11)
 
@@ -15,6 +17,7 @@ if sys.version_info[:2] != SUPPORTED_PYTHON:
 
 
 app = FastAPI(title="NexusTiQ 24 Supply Chain Control Tower")
+app.include_router(disruptions_router)
 
 
 @app.get("/health")
