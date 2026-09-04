@@ -6,6 +6,8 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from analysis.impact import analyze_impact
+from analysis.models import ImpactResponse
 from gemini.errors import GeminiExtractionError
 from gemini.extraction import extract_understanding
 from gemini.models import DisruptionUnderstanding
@@ -121,3 +123,17 @@ def match_disruption(disruption_id: str) -> MatchingResponse:
     if understanding is None:
         raise HTTPException(status_code=409, detail="Disruption understanding is not available")
     return match_understanding(disruption_id, understanding, load_sample_data())
+
+
+@router.post("/{disruption_id}/impact", response_model=ImpactResponse)
+def analyze_disruption_impact(disruption_id: str) -> ImpactResponse:
+    """Calculate deterministic operational impact from stored understanding and matches."""
+
+    if disruption_id not in _disruptions:
+        raise HTTPException(status_code=404, detail=f"Disruption not found: {disruption_id}")
+    understanding = _understandings.get(disruption_id)
+    if understanding is None:
+        raise HTTPException(status_code=409, detail="Disruption understanding is not available")
+    data = load_sample_data()
+    matching = match_understanding(disruption_id, understanding, data)
+    return analyze_impact(disruption_id, matching, data)

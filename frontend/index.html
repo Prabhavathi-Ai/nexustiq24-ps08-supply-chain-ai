@@ -35,6 +35,10 @@
     .record .reason { color: var(--muted); }
     .banner { padding: 16px; margin-bottom: 18px; background: #fff3df; border-left: 4px solid var(--warn); font-family: Arial, sans-serif; }
     .banner.no-match { background: #fcebea; border-left-color: var(--danger); }
+    .impact-group { margin-top: 24px; }
+    .impact-group h3 { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+    .impact-item { border-left: 3px solid var(--accent); padding: 10px 14px; margin: 8px 0; background: #f8faf7; font-family: Arial, sans-serif; font-size: 14px; }
+    .impact-item.unknown { border-left-color: var(--warn); }
     @media (max-width: 600px) { main { padding: 24px 16px 48px; } header { padding: 22px 16px; } .panel { padding: 18px; } }
   </style>
 </head>
@@ -70,9 +74,14 @@
         const understood = await request(`/api/disruptions/${disruption.disruption_id}/understanding`, {method:'POST'});
         status.textContent = 'Matching supply-chain records...';
         const matches = await request(`/api/disruptions/${disruption.disruption_id}/matches`, {method:'POST'});
+        status.textContent = 'Tracing operational relationships...';
+        const impact = await request(`/api/disruptions/${disruption.disruption_id}/impact`, {method:'POST'});
         const facts = understood.understanding;
         const cards = [...matches.suppliers.map(x => ['Supplier', x]), ...matches.shipments.map(x => ['Shipment', x]), ...matches.containers.map(x => ['Container', x]), ...matches.routes.map(x => ['Route', x]), ...matches.skus.map(x => ['SKU', x])];
+        const impactItems = records => records.map(item => `<div class="impact-item ${escapeHtml(item.classification)}"><strong>${escapeHtml(item.entity_type)}: ${escapeHtml(item.entity_name)}</strong><br>${escapeHtml(item.reason)}<br><small>Source: ${escapeHtml(item.source_record)} | Fact: ${escapeHtml(item.supporting_fact)}</small></div>`).join('');
+        const impactPanel = `<div class="impact-group"><h2>Operational impact</h2><div class="notice"><strong>Impact state</strong>${escapeHtml(impact.impact_state.replaceAll('_', ' '))}</div>${impact.direct_impact.length ? `<h3>Direct impact</h3>${impactItems(impact.direct_impact)}` : ''}${impact.downstream_potential_impact.length ? `<h3>Downstream potential impact</h3>${impactItems(impact.downstream_potential_impact)}` : ''}${impact.impact_state === 'review_required' ? '<div class="banner">Review required: multiple possible matches were retained.</div>' : ''}${impact.insufficient_information.length ? `<h3>Insufficient information</h3>${impactItems(impact.insufficient_information)}` : ''}${impact.impact_state === 'no_impact' ? '<div class="banner no-match">No supply-chain impact could be established from the available records.</div>' : ''}</div>`;
         result.innerHTML = `<div class="panel"><h2>Disruption understood</h2><div class="notice"><strong>Original notice</strong>${escapeHtml(disruption.original_description)}</div><div class="facts"><div class="fact"><small>Event</small><span>${escapeHtml(facts.event_type || 'Not stated')}</span></div><div class="fact"><small>Locations</small><span>${list(facts.locations)}</span></div><div class="fact"><small>Duration</small><span>${escapeHtml(facts.duration_text || 'Not stated')}</span></div><div class="fact"><small>Transport</small><span>${escapeHtml(facts.transport_mode || 'Not stated')}</span></div></div>${facts.uncertainties.length ? `<div class="banner">Uncertainty: ${list(facts.uncertainties)}</div>` : ''}<h2>Potentially affected records</h2>${matches.match_status === 'no_match' ? '<div class="banner no-match">No matching supply-chain records found.</div>' : ''}${matches.match_status === 'ambiguous' ? '<div class="banner">Multiple possible matches found - review required.</div>' : ''}<div class="records">${cards.map(([title, card]) => renderCandidates(title, [card])).join('')}</div>${matches.evidence.length ? `<h2>Evidence</h2><ul>${matches.evidence.map(escapeHtml).map(item => `<li>${item}</li>`).join('')}</ul>` : ''}</div>`;
+        result.insertAdjacentHTML('beforeend', impactPanel);
         result.hidden = false; status.textContent = 'Investigation ready for review.';
       } catch (error) { status.textContent = error.message || 'The investigation could not be completed.'; status.className += ' error'; }
       finally { analyze.disabled = false; }
