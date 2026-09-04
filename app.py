@@ -1,6 +1,7 @@
 """Application entry point for the PS08 control tower."""
 
 import sys
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -28,7 +29,8 @@ def health_check() -> dict[str, str]:
     return {"status": "ok", "track_id": "PS08"}
 
 
-app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
+FRONTEND_DIRECTORY = Path(__file__).resolve().parent / "frontend"
+app.mount("/", StaticFiles(directory=FRONTEND_DIRECTORY, html=True), name="frontend")
 
 
 if __name__ == "__main__":
