@@ -6,6 +6,10 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from gemini.errors import GeminiExtractionError
+from gemini.extraction import extract_understanding
+from gemini.models import DisruptionUnderstanding
+
 
 MAX_DESCRIPTION_LENGTH = 5_000
 
@@ -29,6 +33,12 @@ class DisruptionNoticeResponse(BaseModel):
     normalized_description: str
     reported_at: datetime
     source: str | None
+
+
+class DisruptionUnderstandingResponse(BaseModel):
+    disruption_id: str
+    original_description: str
+    understanding: DisruptionUnderstanding
 
 
 router = APIRouter(prefix="/api/disruptions", tags=["disruptions"])
@@ -75,3 +85,21 @@ def get_disruption(disruption_id: str) -> DisruptionNoticeResponse:
     if record is None:
         raise HTTPException(status_code=404, detail=f"Disruption not found: {disruption_id}")
     return record
+
+
+@router.post("/{disruption_id}/understanding", response_model=DisruptionUnderstandingResponse)
+def understand_disruption(disruption_id: str) -> DisruptionUnderstandingResponse:
+    """Extract notice facts without calculating operational impact."""
+
+    record = _disruptions.get(disruption_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Disruption not found: {disruption_id}")
+    try:
+        understanding = extract_understanding(record.original_description)
+    except GeminiExtractionError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    return DisruptionUnderstandingResponse(
+        disruption_id=record.disruption_id,
+        original_description=record.original_description,
+        understanding=understanding,
+    )
