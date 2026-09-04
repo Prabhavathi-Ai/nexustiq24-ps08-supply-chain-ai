@@ -76,6 +76,44 @@ python -m compileall -q app.py analysis api matching models services tests
 
 The application is served by `app.py`; no Node.js, npm command, second server, database setup, or asset build is required.
 
+## Evaluator demo scenarios
+
+Use the single page at `http://localhost:8000/` after setting `GEMINI_API_KEY`.
+
+### Affected disruption
+
+Enter:
+
+```text
+Heavy flooding has affected transport routes near Vellore. Deliveries from some suppliers may be delayed for the next five days.
+```
+
+The expected path is:
+
+```text
+Vellore
+-> route R-001 (Chennai -> Vellore -> Bengaluru)
+-> shipment SHP-001
+-> container CNT-1042
+-> SKU-001
+-> inventory
+-> orders ORD-001, ORD-002, ORD-003
+-> linked customers
+-> deterministic priority orders and evidence-grounded action options
+```
+
+### No-impact disruption
+
+Enter:
+
+```text
+Severe flooding has been reported near Kandla and may disrupt local roads.
+```
+
+Because Kandla is not connected to a route or pending operational record in the committed sample data, the expected result is `no_impact`: no affected orders, customers, shortages, or action recommendation are fabricated.
+
+The complete affected and no-impact flows are covered by the automated demo-flow tests. Live Gemini understanding still requires `GEMINI_API_KEY`.
+
 ## Foundation layout
 
 - `app.py`: single application entry point
