@@ -7,8 +7,9 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from analysis.impact import analyze_impact
-from analysis.models import ImpactResponse, PrioritizationResponse
+from analysis.models import ActionPlanResponse, ImpactResponse, PrioritizationResponse
 from analysis.prioritization import prioritize_orders
+from analysis.recommendations import build_action_plan
 from gemini.errors import GeminiExtractionError
 from gemini.extraction import extract_understanding
 from gemini.models import DisruptionUnderstanding
@@ -154,3 +155,20 @@ def prioritize_disruption_orders(disruption_id: str) -> PrioritizationResponse:
     matching = match_understanding(disruption_id, understanding, data)
     impact = analyze_impact(disruption_id, matching, data)
     return prioritize_orders(record.reported_at.date(), impact, data)
+
+
+@router.post("/{disruption_id}/recommendations", response_model=ActionPlanResponse)
+def recommend_disruption_actions(disruption_id: str) -> ActionPlanResponse:
+    """Return evidence-grounded options without executing any action."""
+
+    record = _disruptions.get(disruption_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Disruption not found: {disruption_id}")
+    understanding = _understandings.get(disruption_id)
+    if understanding is None:
+        raise HTTPException(status_code=409, detail="Disruption understanding is not available")
+    data = load_sample_data()
+    matching = match_understanding(disruption_id, understanding, data)
+    impact = analyze_impact(disruption_id, matching, data)
+    priorities = prioritize_orders(record.reported_at.date(), impact, data)
+    return build_action_plan(impact, priorities)

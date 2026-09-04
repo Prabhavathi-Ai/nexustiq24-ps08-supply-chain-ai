@@ -79,3 +79,26 @@ class PrioritizationResponse(BaseModel):
     orders: list[PrioritizedOrder] = Field(default_factory=list)
     insufficient_information: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class ActionOption(BaseModel):
+    option_id: str
+    name: str
+    description: str
+    suitability: str
+    trade_offs: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    prerequisites: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    affected_order_ids: list[str] = Field(default_factory=list)
+
+
+class ActionPlanResponse(BaseModel):
+    overall_state: Literal["recommendation_available", "no_impact", "review_required", "insufficient_information"]
+    recommended_option_id: str | None = None
+    recommended_course: str
+    why: list[str] = Field(default_factory=list)
+    options: list[ActionOption] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    operator_decision_required: str
+    warnings: list[str] = Field(default_factory=list)
