@@ -119,3 +119,86 @@ class ActionPlanResponse(BaseModel):
     operator_decision_required: str
     warnings: list[str] = Field(default_factory=list)
     evidence_references: list[EvidenceReference] = Field(default_factory=list)
+
+
+class OrderQuantityStatistics(BaseModel):
+    """Descriptive statistics over active order records in the committed dataset."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    total_active_orders: int
+    total_ordered_quantity: int | None = None
+    average_order_quantity: float | None = None
+    median_order_quantity: float | None = None
+    minimum_order_quantity: int | None = None
+    maximum_order_quantity: int | None = None
+    active_order_ids: list[str] = Field(default_factory=list)
+    priority_counts: dict[str, int] = Field(default_factory=dict)
+    status_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class InventoryStatistics(BaseModel):
+    """Aggregated inventory position and deterministic shortage totals."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    total_available_quantity: int | None = None
+    average_inventory_per_sku: float | None = None
+    median_inventory_per_sku: float | None = None
+    tracked_sku_ids: list[str] = Field(default_factory=list)
+    total_shortage_quantity: int | None = None
+    shortage_sku_ids: list[str] = Field(default_factory=list)
+    shortage_incomplete: bool = False
+
+
+class ShipmentStatistics(BaseModel):
+    """Descriptive counts over active shipment records."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    total_active_shipments: int
+    active_shipment_ids: list[str] = Field(default_factory=list)
+    shipment_status_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class DisruptionStatistics(BaseModel):
+    """Counts over committed disruption records grouped by event type."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    total_disruptions: int
+    counts_by_event_type: dict[str, int] = Field(default_factory=dict)
+
+
+class InvestigationStatistics(BaseModel):
+    """Investigation-specific metrics derived only from established impact records."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    impact_state: ImpactState
+    affected_shipment_count: int
+    affected_order_count: int
+    affected_customer_count: int
+    affected_order_quantity: int | None = None
+    affected_orders_shortage_quantity: int | None = None
+    affected_orders_shortage_rate: float | None = None
+    shortage_incomplete: bool = False
+    affected_shipment_ids: list[str] = Field(default_factory=list)
+    affected_order_ids: list[str] = Field(default_factory=list)
+    affected_customer_ids: list[str] = Field(default_factory=list)
+    affected_sku_ids: list[str] = Field(default_factory=list)
+    impact_classification_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class OperationalAnalyticsResponse(BaseModel):
+    """Deterministic descriptive statistics for a disruption investigation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    disruption_id: str
+    orders: OrderQuantityStatistics
+    inventory: InventoryStatistics
+    shipments: ShipmentStatistics
+    disruptions: DisruptionStatistics
+    investigation: InvestigationStatistics
+    warnings: list[str] = Field(default_factory=list)
