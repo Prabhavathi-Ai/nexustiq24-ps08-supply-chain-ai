@@ -95,8 +95,30 @@
     .completion { padding: 26px; border: 1px solid var(--line); background: var(--panel); }
     .completion-list { margin: 14px 0; }
     .completion-list li { font-family: Arial, sans-serif; font-size: 14px; margin-bottom: 6px; }
+    .step-counter { margin: 10px 0 4px; font: 700 11px Arial, sans-serif; letter-spacing: .08em; color: var(--muted); text-transform: uppercase; }
+    .wizard-step .step-num { display: inline-block; min-width: 18px; margin-right: 6px; padding: 2px 5px; background: rgba(255,255,255,.55); font: 700 11px Arial, sans-serif; }
+    .wizard-step.active .step-num { background: rgba(255,255,255,.28); }
+    .wizard-step.done .step-num { background: rgba(23,98,78,.18); }
+    .guide { border-left: 4px solid var(--accent); background: #f0f6f1; padding: 12px 14px; margin: 14px 0 18px; font-family: Arial, sans-serif; font-size: 14px; }
+    .guide b { display: block; margin-bottom: 4px; font: 700 11px Arial, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--accent-dark); }
+    .verdict { border: 1px solid var(--line); background: var(--panel); padding: 18px 20px; margin: 0 0 16px; }
+    .verdict h2 { margin-bottom: 6px; }
+    .verdict-facts { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 8px; font-family: Arial, sans-serif; font-size: 13px; color: var(--muted); }
+    .verdict-facts b { color: var(--ink); }
+    .detail-toggle { border: 1px solid var(--line); background: white; padding: 0; margin: 0 0 10px; }
+    .detail-toggle summary { cursor: pointer; padding: 12px 14px; font: 700 13px Arial, sans-serif; color: var(--accent-dark); list-style: none; }
+    .detail-toggle summary::-webkit-details-marker { display: none; }
+    .detail-toggle summary::before { content: '\25B8'; color: var(--accent); margin-right: 8px; }
+    .detail-toggle[open] summary { border-bottom: 1px solid var(--line); }
+    .detail-toggle[open] summary::before { content: '\25BE'; }
+    .detail-toggle .detail-body { padding: 4px 14px 14px; }
+    .flow-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 14px; background: var(--accent-dark); color: #eef7ef; font: 700 12px Arial, sans-serif; margin: 0 0 18px; }
+    .flow-strip span { background: rgba(255,255,255,.12); padding: 6px 10px; }
+    .flow-strip i { font-style: normal; color: #9ecfc0; }
+    .pending-flag { border-left: 4px solid var(--warn); background: #fff3df; padding: 12px 14px; margin: 0 0 16px; font-family: Arial, sans-serif; font-size: 14px; }
+    .pending-flag b { text-transform: uppercase; font-size: 12px; letter-spacing: .08em; }
     @media (max-width: 820px) { .summary-grid { grid-template-columns: repeat(3, 1fr); } }
-    @media (max-width: 600px) { main { padding: 24px 16px 48px; } header { padding: 18px 16px; } .header-meta { display: none; } .panel { padding: 18px; } .wizard-step { text-align: left; } .summary-grid { grid-template-columns: repeat(2, 1fr); } .role-layout { grid-template-columns: 1fr; } .case-card { align-items: flex-start; flex-direction: column; } }
+    @media (max-width: 600px) { main { padding: 24px 16px 48px; } header { padding: 18px 16px; } .header-meta { display: none; } .panel { padding: 18px; } .wizard-step { text-align: left; } .summary-grid { grid-template-columns: repeat(2, 1fr); } .role-layout { grid-template-columns: 1fr; } .case-card { align-items: flex-start; flex-direction: column; } .flow-strip { gap: 6px; font-size: 11px; } .detail-toggle summary { font-size: 12px; } .verdict { padding: 14px 16px; } }
   </style>
 </head>
 <body>
@@ -137,6 +159,7 @@
         <button id="wizard-back-tower" class="link-button" type="button" data-action="tower">Back to control tower</button>
       </div>
       <div class="wizard-bar" id="step-bar"></div>
+      <div class="step-counter" id="step-counter"></div>
       <div id="wizard-status" class="status" role="status"></div>
       <section class="panel" id="step-content"></section>
       <div class="wizard-nav" id="wizard-nav"></div>
@@ -168,6 +191,12 @@
         'confirm-customer-communication': 'customer_service',
       };
       const STEP_LABELS = ['DISRUPTION', 'IMPACT', 'PRIORITIES', 'RESPONSE', 'DECISION'];
+      const STEP_GUIDES = [
+        'Review the disruption notice and confirm what the system understood from it, then continue to the impact stage.',
+        'Review which operational records are actually affected, then continue to the priorities stage.',
+        'Review which affected orders need attention first, then continue to the response stage.',
+        'Review the recommended response and the reviewers assigned to each human decision, then continue to the decision stage.',
+      ];
 
       const CASES = {
         vellore: { key: 'vellore', name: 'Vellore Flood Disruption', location: 'Vellore', notice: 'Heavy flooding has affected transport routes near Vellore. Deliveries may be delayed for five days.', kind: 'affected', status: 'new', step: 0, decisions: {}, lastAnalytics: null },
@@ -234,7 +263,17 @@
         return `<div class="impact-group"><h2>Disruption detected</h2><p class="data-note">What the system understood from the disruption notice.</p><div class="facts"><div class="fact"><small>Event</small><span>${ESCAPE(facts.event_type || 'Not stated')}</span></div><div class="fact"><small>Location</small><span>${list(facts.locations)}</span></div><div class="fact"><small>Duration</small><span>${ESCAPE(facts.duration_text || 'Not stated')}</span></div><div class="fact"><small>Transport mode</small><span>${ESCAPE(facts.transport_mode || 'Not stated')}</span></div></div>${(facts.uncertainties || []).length ? `<div class="banner">Uncertainty: ${list(facts.uncertainties)}</div>` : ''}<div class="notice"><strong>Original notice</strong>${ESCAPE(data.disruption.original_description)}</div></div>`;
       };
 
-      const stepImpact = data => `<div class="impact-group"><h2>What is actually affected?</h2><p class="data-note">The deterministic investigation traces the notice through committed operational records. Every item keeps its evidence and reason.</p>${chainHTML(data.impact, data.matches, data.understood)}${impactPanelHTML(data)}${analyticsPanelHTML(data)}${movementPanelHTML(data)}${recordsList(data.matches)}</div>`;
+      const stepImpact = data => {
+        const inv = data.analytics.investigation;
+        const shipmentCount = (inv.affected_shipment_ids || []).length;
+        const verds = [
+          ['Affected orders', inv.affected_order_count],
+          ['Affected shipments', shipmentCount],
+          ['Affected customers', inv.affected_customer_count],
+          ['Shortage quantity', inv.affected_orders_shortage_quantity ?? '\u2013'],
+        ];
+        return `<div class="verdict"><h2>Impact summary</h2><p class="data-note">The disruption notice was traced through committed operational records. ${inv.affected_order_count} affected order(s) and ${shipmentCount} shipment(s) were established; the detail below keeps every source reference.</p><div class="verdict-facts">${verds.map(([label, value]) => `<span>${label}: <b>${ESCAPE(value)}</b></span>`).join('')}</div></div>${chainHTML(data.impact, data.matches, data.understood)}<div class="impact-group">${impactPanelHTML(data)}</div><details class="detail-toggle"><summary>Operational analytics (orders, inventory, trace)</summary><div class="detail-body">${analyticsPanelHTML(data)}</div></details><details class="detail-toggle"><summary>Shipment movement evidence</summary><div class="detail-body">${movementPanelHTML(data)}</div></details><details class="detail-toggle"><summary>Matched records and evidence details</summary><div class="detail-body">${recordsList(data.matches)}</div></details>`;
+      };
 
       const stepPriorities = data => {
         const p = data.priorities;
@@ -264,7 +303,7 @@
         const controls = recorded && recorded.status === 'recorded'
           ? `<p class="priority-meta">Selected: ${ESCAPE(recorded.selected_option)}${recorded.reviewer_role ? ` \u00b7 Reviewer: ${ESCAPE(recorded.reviewer_role)}` : ''}${recorded.recorded_at ? ` \u00b7 Recorded ${ESCAPE(recorded.recorded_at)}` : ''}</p><p class="data-note">Decision recorded \u2014 not executed. No message was sent and no operational action was taken.</p>`
           : `<label for="coordination-select-${index}">Human decision</label><select id="coordination-select-${index}" class="draft">${options.map(option => `<option value="${ESCAPE(option)}">${ESCAPE(option)}</option>`).join('')}</select><button type="button" class="link-button" data-record="${index}">Record Human Decision</button><div id="coordination-outcome-${index}" class="status"></div>`;
-        return `<div class="decision-card${isMine ? ' mine' : ''}">${roleLabel}${isMine ? '<span class="status-badge">YOUR DECISION</span>' : ''} ${pill}<strong>${ESCAPE(req.question)}</strong><small>${(req.rationale || []).map(ESCAPE).join(' ')}</small>${controls}${evidenceRefs(req.evidence_references)}</div>`;
+        return `<div class="decision-card${isMine ? ' mine' : ''}">${roleLabel}${isMine ? '<span class="status-badge">YOUR DECISION</span>' : ''} ${pill}<strong>${ESCAPE(req.question)}</strong><small>${(req.rationale || []).map(ESCAPE).join(' ')}</small>${stateLine}${controls}${evidenceRefs(req.evidence_references)}</div>`;
       };
 
       const stepDecision = data => {
@@ -272,12 +311,18 @@
         const cs = currentCase();
         const reqs = coordination.decision_requirements || [];
         const recCount = reqs.filter(req => cs.decisions[req.decision_id] && cs.decisions[req.decision_id].status === 'recorded').length;
+        const pending = reqs.length - recCount;
         const mineRole = ROLES[session.role].coordinationRole;
         const isCoordinator = session.role === 'operations_manager';
         const cards = reqs.map((req, index) => decisionCardHTML(req, index, cs.decisions[req.decision_id], mineRole, isCoordinator)).join('');
         const roleList = (coordination.roles || []).map(role => `<div class="impact-item"><strong>${ESCAPE(role.name)}</strong> <span class="priority-meta">priority ${role.priority}</span><br>${ESCAPE(role.responsibility)}<br><small><b>Why:</b> ${ESCAPE(role.reason)}</small><div class="priority-meta">Orders: ${list(role.related_order_ids)} \u00b7 Shipments: ${list(role.related_shipment_ids)}</div></div>`).join('');
-        const statusLine = reqs.length ? `${recCount} / ${reqs.length} decisions recorded${recCount < reqs.length ? ` | ${reqs.length - recCount} ${reqs.length - recCount === 1 ? 'decision' : 'decisions'} pending` : ''}` : 'No human decision is required.';
-        return `<div class="impact-group"><h2>Human approval required</h2><p class="data-note"><b>The system recommends. You decide.</b> Each decision below is recorded by the assigned role before any option may be considered. Nothing is executed automatically.</p>${session.lastRecordNote ? `<div class="banner">${ESCAPE(session.lastRecordNote)}</div>` : ''}<div class="notice"><strong>Decision status</strong>${statusLine}</div>${reqs.length ? `<div class="priority-list">${cards}</div>` : '<div class="banner no-match">No human decision is required.</div>'}<h3>Reviewers</h3><div class="priority-list">${roleList}</div><p class="data-note">The coordination layer is demo output: it assigns reviewers and records decisions deterministically from committed evidence. It never sends messages, places orders, or changes operational records.</p>${coordination.evidence_references && coordination.evidence_references.length ? `<small class="priority-meta">Evidence: ${coordination.evidence_references.map(ref => `${ESCAPE(ref.evidence_id)} (${ESCAPE(ref.entity_type)} ${ESCAPE(ref.record_id)}.${ESCAPE(ref.field)} = ${ESCAPE(ref.value)})`).join(' | ')}</small>` : ''}</div>`;
+        const statusBlock = reqs.length
+          ? (pending === 0
+              ? '<div class="verdict"><h2>All human decisions recorded</h2><p class="data-note">Every required decision has been recorded by its assigned role. Nothing was executed automatically; this case is ready to close.</p></div>'
+              : `<div class="pending-flag"><b>Awaiting ${pending} human decision${pending === 1 ? '' : 's'}</b> \u2014 ${recCount} of ${reqs.length} requirements are recorded. The case stays open until every assigned reviewer records a decision. The system will not execute anything on its own.</div>`)
+          : '<div class="banner no-match">No human decision is required for this case.</div>';
+        const flow = '<div class="flow-strip"><span>System recommends</span><i>\u2192</i><span>Assigned human reviews</span><i>\u2192</i><span>Human records decision</span><i>\u2192</i><span>Decision is recorded</span><i>\u2192</i><span>Nothing executes automatically</span></div>';
+        return `<div class="impact-group"><h2>Human approval required</h2>${flow}${session.lastRecordNote ? `<div class="banner">${ESCAPE(session.lastRecordNote)}</div>` : ''}${statusBlock}${reqs.length ? `<div class="priority-list">${cards}</div>` : ''}<details class="detail-toggle"><summary>Review coordination details</summary><div class="detail-body"><h3>Reviewers</h3><div class="priority-list">${roleList}</div><p class="data-note">The coordination layer is demo output: it assigns reviewers and records decisions deterministically from committed evidence. It never sends messages, places orders, or changes operational records.</p>${coordination.evidence_references && coordination.evidence_references.length ? `<small class="priority-meta">Evidence: ${coordination.evidence_references.map(ref => `${ESCAPE(ref.evidence_id)} (${ESCAPE(ref.entity_type)} ${ESCAPE(ref.record_id)}.${ESCAPE(ref.field)} = ${ESCAPE(ref.value)})`).join(' | ')}</small>` : ''}</div></details></div>`;
       };
 
       const completionView = () => {
@@ -285,20 +330,31 @@
         const data = forData(cs.key);
         const reqs = data.coordination.decision_requirements || [];
         const recCount = reqs.filter(req => cs.decisions[req.decision_id] && cs.decisions[req.decision_id].status === 'recorded').length;
-        return `<div class="completion"><div class="eyebrow">Investigation complete</div><h2>Response review complete</h2><div class="notice"><strong>${recCount} / ${reqs.length} decisions recorded</strong><p>${ESCAPE(cs.name)}</p></div><ul class="completion-list"><li>\u2713 Impact investigated</li><li>\u2713 Orders prioritized</li><li>\u2713 Response reviewed</li><li>\u2713 Human decisions recorded</li></ul><div class="banner"><b>Nothing was executed automatically.</b><br>Decisions are recorded for operator review. The system did not send messages, place orders, or change operational records.</div><button type="button" class="link-button" data-action="tower">Return to Control Tower</button></div>`;
+        return `<div class="verdict"><div class="eyebrow">Final state</div><h2>Investigation complete</h2><p class="data-note">${ESCAPE(cs.name)}</p><div class="notice"><strong>${recCount} / ${reqs.length} decisions recorded</strong><p>All required human decisions have been recorded.</p></div><ul class="completion-list"><li>\u2713 Impact investigated</li><li>\u2713 Orders prioritized</li><li>\u2713 Response reviewed</li><li>\u2713 Human decisions recorded</li></ul></div><div class="banner"><b>No operational action was executed automatically.</b><br>Decisions are recorded for operator review only. The system did not send messages, place orders, or change operational records.</div><button type="button" class="link-button" data-action="tower">Return to Control Tower</button>`;
       };
 
       const noImpactView = () => {
         const cs = currentCase();
-        return `<div class="completion"><div class="eyebrow">Investigation complete</div><h2>No impact</h2><p>${ESCAPE(cs.name)}</p><div class="notice"><strong>The disruption notice was understood</strong><br>No pending operational records matched it, so no supply-chain impact was established.</div><div class="summary-grid"><div class="summary-card"><small>Affected shipments</small><strong>0</strong></div><div class="summary-card"><small>Affected orders</small><strong>0</strong></div><div class="summary-card"><small>Affected customers</small><strong>0</strong></div></div><p class="data-note">No response coordination required. No decisions are needed and nothing was executed.</p><button type="button" class="link-button" data-action="tower">Return to Control Tower</button></div>`;
+        const data = forData(cs.key);
+        const details = data
+          ? `<details class="detail-toggle"><summary>Inspect investigation details</summary><div class="detail-body">${chainHTML(data.impact, data.matches, data.understood)}${recordsList(data.matches)}${analyticsPanelHTML(data)}</div></details>`
+          : '';
+        return `<div class="verdict"><div class="eyebrow">Final state</div><h2>No impact</h2><p class="data-note">${ESCAPE(cs.name)}</p><ul class="completion-list"><li>\u2713 The disruption notice was understood.</li><li>\u2713 No pending operational records matched it, so no supply-chain exposure was established.</li><li>\u2713 No response coordination is required and no decisions were created.</li></ul><div class="summary-grid"><div class="summary-card"><small>Affected shipments</small><strong>0</strong></div><div class="summary-card"><small>Affected orders</small><strong>0</strong></div><div class="summary-card"><small>Affected customers</small><strong>0</strong></div></div></div><p class="data-note">Nothing was executed automatically.</p>${details}<button type="button" class="link-button" data-action="tower">Return to Control Tower</button>`;
       };
 
       const renderStepBar = currentStep => {
         el('step-bar').innerHTML = STEP_LABELS.map((label, index) => {
           const done = currentStep > index || currentStep === STEP_LABELS.length;
           const active = currentStep === index;
-          return `<div class="wizard-step${active ? ' active' : ''}${done ? ' done' : ''}">${label}</div>`;
+          return `<div class="wizard-step${active ? ' active' : ''}${done ? ' done' : ''}"><span class="step-num">${index + 1}</span>${label}</div>`;
         }).join('');
+        const total = STEP_LABELS.length;
+        if (currentStep >= total) {
+          el('step-counter').textContent = `All ${total} steps complete \u00b7 ${STEP_LABELS.join(' \u00b7 ')}`;
+        } else {
+          const remaining = total - currentStep - 1;
+          el('step-counter').textContent = `Step ${currentStep + 1} of ${total}: ${STEP_LABELS[currentStep]}${remaining ? ` \u00b7 ${remaining} ${remaining === 1 ? 'step' : 'steps'} remaining` : ' \u00b7 final step'}`;
+        }
       };
 
       const renderNav = currentStep => {
@@ -322,7 +378,19 @@
           data.impact.impact_state === 'no_impact' ? el('step-content').innerHTML = noImpactView() : renderCompletion();
           return;
         }
-        el('step-content').innerHTML = [stepDisruption, stepImpact, stepPriorities, stepResponse, stepDecision][currentStep](data);
+        let guide;
+        if (currentStep === 4 && data.coordination) {
+          const reqs = data.coordination.decision_requirements || [];
+          const recCount = reqs.filter(req => cs.decisions[req.decision_id] && cs.decisions[req.decision_id].status === 'recorded').length;
+          guide = !reqs.length
+            ? 'No human decision is required for this case.'
+            : recCount < reqs.length
+              ? `${reqs.length - recCount} of ${reqs.length} required decisions still await their assigned reviewer. Record them below to close the case; the system will not act without them.`
+              : 'All required decisions have been recorded. The case is complete and nothing was executed automatically.';
+        } else {
+          guide = STEP_GUIDES[currentStep] || 'Proceed to the next stage of the investigation.';
+        }
+        el('step-content').innerHTML = `<div class="guide"><b>What to do next</b>${guide}</div>${[stepDisruption, stepImpact, stepPriorities, stepResponse, stepDecision][currentStep](data)}`;
       };
 
       const renderCompletion = () => {
@@ -465,7 +533,10 @@
           const roleId = DECISION_ROLE[req.decision_type] || 'operations_manager';
           if (session.role !== 'operations_manager' && roleId !== mineRole) return '';
           const recorded = cs.decisions[req.decision_id];
-          const pill = recorded && recorded.status === 'recorded' ? '<span class="dec-pill recorded">Recorded</span>' : '<span class="dec-pill pending">Pending</span>';
+const pill = recorded && recorded.status === 'recorded' ? '<span class="dec-pill recorded">Recorded \u2014 not executed</span>' : '<span class="dec-pill pending">Decision required</span>';
+        const stateLine = recorded && recorded.status === 'recorded'
+          ? '<p class="priority-meta"><b>Decision recorded</b> \u2014 awaiting no further action on this requirement, and nothing was executed.</p>'
+          : '<p class="priority-meta"><b>Decision required from a human</b> \u2014 the system recommends only; this requirement stays open until it is recorded.</p>';
           return `<div class="case-card"><div>${pill}<h2>${ESCAPE(req.question)}</h2><p>Assigned role: ${ESCAPE(ROLE_DISPLAY[roleId] || roleId)} \u00b7 Recommended: ${ESCAPE(req.recommended_option)}</p></div><button type="button" class="link-button" data-action="open" data-case="${cs.key}" data-step="4">Review decision</button></div>`;
         }).join('');
         host.innerHTML = rows || `<p class="data-note">${session.role === 'operations_manager' ? 'You coordinate all decisions. Open an exception to review them.' : 'No decisions are currently assigned to this role.'}</p>`;
