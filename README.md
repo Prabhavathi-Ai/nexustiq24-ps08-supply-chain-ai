@@ -13,7 +13,7 @@ The product is a guided control-tower workflow. Its primary users are:
 
 It uses a small synthetic dataset for demonstration and testing. It is not connected to production logistics systems.
 
-## 30-second judge narrative
+##  judge narrative
 
 > This is an evidence-first supply-chain disruption response assistant. An operator gives it a messy disruption notice. Gemini converts that notice into structured understanding, then deterministic logic matches it against operational records, calculates the impact, prioritizes affected orders, and presents evidence-backed response options. The system can compare what-if scenarios and route decisions to the appropriate human roles. Humans make and record the decisions; nothing is automatically executed.
 
