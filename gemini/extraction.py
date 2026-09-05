@@ -34,15 +34,32 @@ class GeminiTextClient(Protocol):
         """Generate structured text for a prompt."""
 
 
+GEMINI_RETRY_ATTEMPTS = 4
+GEMINI_RETRY_INITIAL_DELAY = 0.4
+GEMINI_RETRY_MAX_DELAY = 2.0
+GEMINI_RETRY_EXP_BASE = 2
+GEMINI_RETRY_JITTER = 0.5
+GEMINI_RETRY_STATUS_CODES = (408, 429, 500, 502, 503, 504)
+
+
 class GoogleGeminiTextClient:
     """Adapter around the official Google GenAI SDK, loaded only when requested."""
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, *, http_options: dict[str, Any] | None = None) -> None:
         try:
             from google import genai
         except ImportError as error:
             raise GeminiConfigurationError("Gemini SDK is not installed") from error
-        self._client = genai.Client(api_key=api_key)
+        options = dict(http_options) if http_options is not None else {}
+        options.setdefault("retry_options", {
+            "attempts": GEMINI_RETRY_ATTEMPTS,
+            "initial_delay": GEMINI_RETRY_INITIAL_DELAY,
+            "max_delay": GEMINI_RETRY_MAX_DELAY,
+            "exp_base": GEMINI_RETRY_EXP_BASE,
+            "jitter": GEMINI_RETRY_JITTER,
+            "http_status_codes": list(GEMINI_RETRY_STATUS_CODES),
+        })
+        self._client = genai.Client(api_key=api_key, http_options=options)
 
     def generate(self, prompt: str) -> str:
         try:

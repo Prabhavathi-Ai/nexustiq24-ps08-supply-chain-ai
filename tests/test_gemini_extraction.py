@@ -3,8 +3,15 @@
 import unittest
 from unittest.mock import patch
 
+import httpx
+
 from gemini.errors import GeminiConfigurationError, GeminiResponseError
-from gemini.extraction import extract_understanding
+from gemini.extraction import (
+    GoogleGeminiTextClient,
+    GEMINI_RETRY_ATTEMPTS,
+    GEMINI_RETRY_STATUS_CODES,
+    extract_understanding,
+)
 
 
 class FakeGeminiClient:
@@ -15,6 +22,51 @@ class FakeGeminiClient:
         if isinstance(self.response, Exception):
             raise self.response
         return self.response
+
+
+EXTRACTION_JSON = (
+    '{"event_type":"flood","locations":["Vellore"],"duration_text":"5 days",'
+    '"transport_mode":"road","route_hints":["Chennai-Bengaluru"],'
+    '"entity_hints":[],"uncertainties":[]}'
+)
+
+
+class ScriptedGeminiClient:
+    """Real Gemini SDK client backed by a scripted httpx transport."""
+
+    def __init__(self, statuses: list[int]) -> None:
+        self.calls = 0
+        self.statuses = statuses
+        transport = httpx.MockTransport(self._handler)
+        self.client = GoogleGeminiTextClient(
+            "test-api-key",
+            http_options={
+                "httpx_client": httpx.Client(transport=transport),
+                "retry_options": {
+                    "attempts": GEMINI_RETRY_ATTEMPTS,
+                    "initial_delay": 0.01,
+                    "max_delay": 0.03,
+                    "exp_base": 2,
+                    "jitter": 0.01,
+                    "http_status_codes": list(GEMINI_RETRY_STATUS_CODES),
+                },
+            },
+        )
+
+    def _handler(self, request: httpx.Request) -> httpx.Response:
+        status = self.statuses[min(self.calls, len(self.statuses) - 1)]
+        self.calls += 1
+        if status == 200:
+            return httpx.Response(
+                200,
+                json={"candidates": [{"content": {"parts": [{"text": EXTRACTION_JSON}]}}]},
+                request=request,
+            )
+        return httpx.Response(
+            status,
+            json={"error": {"code": status, "message": "simulated failure"}},
+            request=request,
+        )
 
 
 class GeminiExtractionTests(unittest.TestCase):
@@ -59,6 +111,42 @@ class GeminiExtractionTests(unittest.TestCase):
     def test_missing_api_key_is_controlled(self) -> None:
         with self.assertRaises(GeminiConfigurationError):
             extract_understanding("Flooding.")
+
+
+class GeminiRetryTests(unittest.TestCase):
+    def test_successful_request_still_succeeds(self) -> None:
+        harness = ScriptedGeminiClient([200])
+        result = extract_understanding("Heavy flooding near Vellore.", harness.client)
+        self.assertEqual(result.event_type, "flood")
+        self.assertEqual(result.locations, ["Vellore"])
+        self.assertEqual(harness.calls, 1)
+
+    def test_transient_503_is_retried_and_succeeds(self) -> None:
+        harness = ScriptedGeminiClient([503, 200])
+        result = extract_understanding("Heavy flooding near Vellore.", harness.client)
+        self.assertEqual(result.event_type, "flood")
+        self.assertEqual(result.locations, ["Vellore"])
+        self.assertEqual(harness.calls, 2)
+
+    def test_persistent_transient_failures_raise_after_bounded_retries(self) -> None:
+        harness = ScriptedGeminiClient([503, 503, 503, 503])
+        with self.assertRaises(GeminiResponseError):
+            extract_understanding("Heavy flooding near Vellore.", harness.client)
+        self.assertEqual(harness.calls, GEMINI_RETRY_ATTEMPTS)
+
+    def test_client_error_is_not_retried(self) -> None:
+        harness = ScriptedGeminiClient([401, 200])
+        with self.assertRaises(GeminiResponseError):
+            extract_understanding("Heavy flooding near Vellore.", harness.client)
+        self.assertEqual(harness.calls, 1)
+
+    def test_retry_policy_is_small_bounded_and_transient_only(self) -> None:
+        self.assertLessEqual(GEMINI_RETRY_ATTEMPTS, 4)
+        self.assertGreaterEqual(GEMINI_RETRY_ATTEMPTS, 1)
+        self.assertTrue({500, 502, 503, 504}.issubset(set(GEMINI_RETRY_STATUS_CODES)))
+        self.assertNotIn(400, GEMINI_RETRY_STATUS_CODES)
+        self.assertNotIn(401, GEMINI_RETRY_STATUS_CODES)
+        self.assertNotIn(403, GEMINI_RETRY_STATUS_CODES)
 
 
 if __name__ == "__main__":
