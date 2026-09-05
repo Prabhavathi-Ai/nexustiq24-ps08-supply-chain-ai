@@ -5,6 +5,7 @@ import asyncio
 import json
 from dataclasses import dataclass
 from datetime import datetime
+from unittest.mock import patch
 
 from fastapi import FastAPI
 
@@ -13,6 +14,7 @@ from api.disruptions import (
     clear_disruptions,
     router,
 )
+from gemini.errors import GeminiResponseError
 
 
 class DisruptionApiTests(unittest.TestCase):
@@ -120,6 +122,20 @@ class DisruptionApiTests(unittest.TestCase):
     def test_invalid_request_body_is_handled(self) -> None:
         response = self.request("POST", "/api/disruptions", raw_body=b"not-json")
         self.assertEqual(response.status_code, 422)
+
+    def test_understanding_timeout_returns_service_unavailable_not_no_impact(self) -> None:
+        created = self.request("POST", "/api/disruptions", {"description": "Flooding near Vellore."}).json()
+        disruption_id = created["disruption_id"]
+
+        def stalled_upstream(*args, **kwargs):
+            raise GeminiResponseError(
+                "Gemini request timed out after 10 seconds"
+            )
+
+        with patch("api.disruptions.extract_understanding", side_effect=stalled_upstream):
+            response = self.request("POST", f"/api/disruptions/{disruption_id}/understanding")
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("timed out", response.json()["detail"])
 
 
 @dataclass

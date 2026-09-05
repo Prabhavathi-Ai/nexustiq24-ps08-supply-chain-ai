@@ -40,6 +40,7 @@ GEMINI_RETRY_MAX_DELAY = 2.0
 GEMINI_RETRY_EXP_BASE = 2
 GEMINI_RETRY_JITTER = 0.5
 GEMINI_RETRY_STATUS_CODES = (408, 429, 500, 502, 503, 504)
+GEMINI_REQUEST_TIMEOUT_MS = 10_000
 
 
 class GoogleGeminiTextClient:
@@ -51,6 +52,8 @@ class GoogleGeminiTextClient:
         except ImportError as error:
             raise GeminiConfigurationError("Gemini SDK is not installed") from error
         options = dict(http_options) if http_options is not None else {}
+        options.setdefault("timeout", GEMINI_REQUEST_TIMEOUT_MS)
+        self._request_timeout_ms = options.get("timeout") or GEMINI_REQUEST_TIMEOUT_MS
         options.setdefault("retry_options", {
             "attempts": GEMINI_RETRY_ATTEMPTS,
             "initial_delay": GEMINI_RETRY_INITIAL_DELAY,
@@ -75,7 +78,24 @@ class GoogleGeminiTextClient:
         except GeminiResponseError:
             raise
         except Exception as error:
+            if self._is_timeout_error(error):
+                raise GeminiResponseError(
+                    f"Gemini request timed out after {self._request_timeout_ms / 1000:g} seconds"
+                ) from error
             raise GeminiResponseError("Gemini request failed") from error
+
+    @staticmethod
+    def _is_timeout_error(error: Exception) -> bool:
+        try:
+            import httpx
+        except ImportError:
+            return False
+        current: Exception | None = error
+        while current is not None:
+            if isinstance(current, httpx.TimeoutException):
+                return True
+            current = current.__cause__
+        return False
 
 
 def extract_understanding(raw_notice: str, client: GeminiTextClient | None = None) -> DisruptionUnderstanding:
