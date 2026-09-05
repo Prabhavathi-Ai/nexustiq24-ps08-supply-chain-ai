@@ -91,6 +91,8 @@
         const analytics = await request(`/api/disruptions/${disruption.disruption_id}/analytics`, {method:'POST'});
         status.textContent = 'Checking shipment movement evidence...';
         const movement = await request(`/api/disruptions/${disruption.disruption_id}/movement`, {method:'POST'});
+        status.textContent = 'Building response coordination...';
+        const coordinationResp = await request(`/api/disruptions/${disruption.disruption_id}/coordination`, {method:'POST'});
         const facts = understood.understanding;
         const cards = [...matches.suppliers.map(x => ['Supplier', x]), ...matches.shipments.map(x => ['Shipment', x]), ...matches.containers.map(x => ['Container', x]), ...matches.routes.map(x => ['Route', x]), ...matches.skus.map(x => ['SKU', x])];
         const evidenceRefs = refs => refs && refs.length ? `<small class="priority-meta">Evidence: ${refs.map(ref => `${escapeHtml(ref.evidence_id)} (${escapeHtml(ref.entity_type)} ${escapeHtml(ref.record_id)}.${escapeHtml(ref.field)} = ${escapeHtml(ref.value)})`).join(' | ')}</small>` : '';
@@ -114,6 +116,26 @@
           return `<div class="impact-item"><strong>${escapeHtml(item.shipment_id)}</strong> \u00b7 ${escapeHtml(item.route_id)} \u00b7 SKU ${escapeHtml(item.sku_id)}<br><b>Route:</b> ${routePath}<br><div class="priority-meta">Status: ${escapeHtml(item.shipment_status)}${item.container_status ? ` | Container: ${escapeHtml(item.container_id)} (${escapeHtml(item.container_status)})` : ''}</div>${schedule}${exposureBadge}<div class="priority-meta">${escapeHtml(item.exposure.basis)}</div><small>Source records: ${escapeHtml(item.source_records.join(', '))}</small></div>`;
         }).join('');
         const movementPanel = `<div class="impact-group"><h2>Shipment Movement</h2><div class="notice"><strong>Route & movement evidence</strong><p class="data-note">${escapeHtml(movement.availability.note)}</p></div>${(movement.shipments || []).length ? `<div class="priority-list">${movementItems}</div>` : `<div class="banner no-match">${escapeHtml(movement.availability.note)}</div>`}${(movement.unknown_shipment_ids || []).length ? `<div class="banner">No committed shipment record for: ${list(movement.unknown_shipment_ids)}.</div>` : ''}${(movement.warnings || []).map(warning => `<div class="banner">${escapeHtml(warning)}</div>`).join('')}</div>`;
+        const responseCoordinationPanel = coordinationResp.coordination_state === 'no_response_coordination_required'
+          ? `<div class="impact-group"><h2>Response Coordination</h2><div class="notice"><strong>No response coordination required</strong><p class="data-note">${escapeHtml(coordinationResp.recommended_next_step)}</p></div>${(coordinationResp.warnings || []).map(warning => `<div class="banner">${escapeHtml(warning)}</div>`).join('')}</div>`
+          : (() => {
+              const reviewRoles = (coordinationResp.roles || []).map(role => `<div class="impact-item"><strong>${escapeHtml(role.name)}</strong> <span class="priority-meta">priority ${role.priority}</span><br>${escapeHtml(role.responsibility)}<br><small><b>Why:</b> ${escapeHtml(role.reason)}</small><div class="priority-meta">Orders: ${list(role.related_order_ids)} · Shipments: ${list(role.related_shipment_ids)}</div></div>`).join('');
+              const recorded = coordinationResp.human_decision;
+              const gate = recorded && recorded.status === 'recorded'
+                ? `<div class="notice"><strong>Human decision recorded</strong><p class="data-note">${escapeHtml(recorded.decision_id)} · Selected: ${escapeHtml(recorded.selected_option)}${recorded.reviewer_role ? ` · Reviewer: ${escapeHtml(recorded.reviewer_role)}` : ''}. The system did not execute or send anything.</p></div>`
+                : `<div class="banner"><b>SYSTEM RECOMMENDATION — HUMAN APPROVAL REQUIRED</b><br>${escapeHtml(coordinationResp.recommended_next_step)}</div>`;
+              const decisionItems = (coordinationResp.decision_requirements || []).map((requirement, index) => {
+                const options = [requirement.recommended_option, ...(requirement.alternative_options || [])];
+                const isRecorded = recorded && recorded.status === 'recorded' && recorded.decision_id === requirement.decision_id;
+                const selection = isRecorded
+                  ? `<p class="priority-meta">Recorded: ${escapeHtml(recorded.selected_option)}</p>`
+                  : `<label for="coordination-select-${index}">Human decision</label><select id="coordination-select-${index}" class="draft">${options.map(option => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join('')}</select><button type="button" class="link-button" data-record-decision data-decision-id="${escapeHtml(requirement.decision_id)}" data-select-for="coordination-select-${index}" data-outcome-for="coordination-outcome-${index}">Record Human Decision</button><div id="coordination-outcome-${index}" class="status"></div>`;
+                return `<div class="impact-item"><strong>${escapeHtml(requirement.question)}</strong><div class="priority-meta">Type: ${escapeHtml(requirement.decision_type)} · Recommended: ${escapeHtml(requirement.recommended_option)}</div><small>${(requirement.rationale || []).map(escapeHtml).join(' ')}</small>${selection}</div>`;
+              }).join('');
+              const roleChips = (coordinationResp.roles || []).length ? (coordinationResp.roles || []).map(role => `<span class="role">${escapeHtml(role.name)}</span>`).join('') : '<span class="role">No assigned reviewers</span>';
+              const references = (coordinationResp.evidence_references || []).map(reference => `${escapeHtml(reference.evidence_id)} (${escapeHtml(reference.entity_type)} ${escapeHtml(reference.record_id)}.${escapeHtml(reference.field)} = ${escapeHtml(reference.value)})`).join(' | ');
+              return `<div class="impact-group"><h2>Response Coordination</h2><div class="notice"><strong>Reviewer roles</strong><div class="role-list">${roleChips}</div></div>${gate}<h3>Decision requirements</h3><div class="priority-list">${decisionItems || '<div class="banner no-match">No human decision is required.</div>'}</div><h3>Reviewers</h3><div class="priority-list">${reviewRoles}</div><p class="data-note">The coordination layer is demo output: it assigns reviewers and records decisions deterministically from committed evidence. It never sends messages, places orders, or changes operational records.</p>${references ? `<small class="priority-meta">Evidence: ${references}</small>` : ''}</div>`;
+            })();
         const priorityItems = priorities.orders.map((order, index) => `<article class="priority-order"><strong>#${index + 1} ${escapeHtml(order.order_id)} - ${escapeHtml(order.customer_name)}</strong><div class="priority-meta">Score ${order.priority_score} | ${escapeHtml(order.urgency)} urgency | ${escapeHtml(order.severity)} severity | SKU ${escapeHtml(order.affected_sku)}</div><div class="priority-meta">Shipments: ${list(order.shipment_ids)} | Routes: ${list(order.route_ids)} | Containers: ${list(order.container_ids)}</div>${order.inventory_shortage ? `<div class="priority-meta">Inventory ${order.inventory_shortage.available_quantity} / order ${order.inventory_shortage.order_quantity} / shortage ${order.inventory_shortage.shortage_quantity}</div>` : ''}<p>${order.reasons.map(escapeHtml).join(' ')}</p><small>${order.evidence.map(escapeHtml).join(' ')}</small>${evidenceRefs(order.evidence_references)}</article>`).join('');
         const priorityPanel = `<div class="impact-group"><h2>Priority orders</h2><div class="notice"><strong>Priority state</strong>${escapeHtml(priorities.overall_state.replaceAll('_', ' '))}</div>${priorities.orders.length ? `<div class="priority-list">${priorityItems}</div>` : '<div class="banner no-match">No affected orders were identified.</div>'}${priorities.insufficient_information.length ? `<div class="banner">Insufficient information: ${list(priorities.insufficient_information)}</div>` : ''}</div>`;
         const optionItems = actionPlan.options.map(option => `<article class="action-option ${option.option_id === actionPlan.recommended_option_id ? 'recommended' : ''}"><strong>${escapeHtml(option.name)}</strong><p>${escapeHtml(option.description)}</p><p><b>Suitability:</b> ${escapeHtml(option.suitability)}</p><p><b>Trade-offs:</b> ${list(option.trade_offs)}</p><p><b>Risks:</b> ${list(option.risks)}</p><p><b>Prerequisites:</b> ${list(option.prerequisites)}</p><p><b>Evidence:</b> ${list(option.evidence)}</p>${evidenceRefs(option.evidence_references)}</article>`).join('');
@@ -123,7 +145,20 @@
         result.insertAdjacentHTML('beforeend', analyticsPanel);
         result.insertAdjacentHTML('beforeend', movementPanel);
         result.insertAdjacentHTML('beforeend', priorityPanel);
+        result.insertAdjacentHTML('beforeend', responseCoordinationPanel);
         result.insertAdjacentHTML('beforeend', actionPanel);
+        result.querySelectorAll('[data-record-decision]').forEach(button => button.addEventListener('click', async () => {
+          const selectEl = document.getElementById(button.getAttribute('data-select-for'));
+          const outcome = document.getElementById(button.getAttribute('data-outcome-for'));
+          outcome.textContent = 'Recording decision...';
+          outcome.className = 'status';
+          try {
+            const recordedDecision = await request(`/api/disruptions/${disruption.disruption_id}/decision`, { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ decision_id: button.getAttribute('data-decision-id'), selected_option: selectEl.value, reviewer_role: null, note: null }) });
+            outcome.textContent = `Decision recorded — not executed. Selected: ${recordedDecision.selected_option}.`;
+            button.disabled = true;
+            selectEl.disabled = true;
+          } catch (error) { outcome.textContent = error.message || 'Could not record the decision.'; outcome.className += ' error'; }
+        }));
         result.hidden = false; status.textContent = 'Investigation ready for review.';
       } catch (error) { status.textContent = error.message || 'The investigation could not be completed.'; status.className += ' error'; }
       finally { analyze.disabled = false; }

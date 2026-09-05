@@ -7,12 +7,15 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from analysis.analytics import build_operational_analytics
+from analysis.coordination import build_response_coordination
 from analysis.impact import analyze_impact
 from analysis.models import (
     ActionPlanResponse,
+    HumanDecision,
     ImpactResponse,
     OperationalAnalyticsResponse,
     PrioritizationResponse,
+    ResponseCoordinationResponse,
     ShipmentMovementResponse,
 )
 from analysis.movement import build_shipment_movement
@@ -23,6 +26,7 @@ from gemini.extraction import extract_understanding
 from gemini.models import DisruptionUnderstanding
 from matching.engine import match_understanding
 from matching.models import MatchingResponse
+from models import SupplyChainData
 from services.data_loader import load_sample_data
 
 
@@ -59,6 +63,7 @@ class DisruptionUnderstandingResponse(BaseModel):
 router = APIRouter(prefix="/api/disruptions", tags=["disruptions"])
 _disruptions: dict[str, DisruptionNoticeResponse] = {}
 _understandings: dict[str, DisruptionUnderstanding] = {}
+_decisions: dict[str, HumanDecision] = {}
 
 
 def normalize_description(description: str) -> str:
@@ -72,6 +77,7 @@ def clear_disruptions() -> None:
 
     _disruptions.clear()
     _understandings.clear()
+    _decisions.clear()
 
 
 @router.post("", response_model=DisruptionNoticeResponse, status_code=status.HTTP_201_CREATED)
@@ -210,3 +216,75 @@ def shipment_movement_evidence(disruption_id: str) -> ShipmentMovementResponse:
     matching = match_understanding(disruption_id, understanding, data)
     impact = analyze_impact(disruption_id, matching, data)
     return build_shipment_movement(disruption_id, impact, data)
+
+
+class DecisionRequest(BaseModel):
+    """A recorded human decision for one coordination decision requirement."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision_id: str
+    selected_option: str
+    reviewer_role: str | None = None
+    note: str | None = None
+
+
+def _coordination_context(disruption_id: str) -> tuple[ImpactResponse, PrioritizationResponse, ActionPlanResponse, SupplyChainData]:
+    """Load the deterministic coordination inputs for a stored disruption."""
+
+    record = _disruptions.get(disruption_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Disruption not found: {disruption_id}")
+    understanding = _understandings.get(disruption_id)
+    if understanding is None:
+        raise HTTPException(status_code=409, detail="Disruption understanding is not available")
+    data = load_sample_data()
+    matching = match_understanding(disruption_id, understanding, data)
+    impact = analyze_impact(disruption_id, matching, data)
+    priorities = prioritize_orders(record.reported_at.date(), impact, data)
+    plan = build_action_plan(impact, priorities)
+    return impact, priorities, plan, data
+
+
+@router.post("/{disruption_id}/coordination", response_model=ResponseCoordinationResponse)
+def coordinate_disruption_response(disruption_id: str) -> ResponseCoordinationResponse:
+    """Return deterministic reviewer roles, decision requirements, and the human decision gate."""
+
+    impact, priorities, plan, data = _coordination_context(disruption_id)
+    return build_response_coordination(disruption_id, impact, priorities, plan, data, decided=_decisions)
+
+
+@router.post("/{disruption_id}/decision", response_model=HumanDecision)
+def record_disruption_decision(disruption_id: str, decision: DecisionRequest) -> HumanDecision:
+    """Record a human decision for a valid requirement without executing anything."""
+
+    impact, priorities, plan, data = _coordination_context(disruption_id)
+    coordination = build_response_coordination(disruption_id, impact, priorities, plan, data, decided=_decisions)
+    requirements = {requirement.decision_id: requirement for requirement in coordination.decision_requirements}
+    requirement = requirements.get(decision.decision_id)
+    if requirement is None:
+        raise HTTPException(status_code=422, detail=f"Unknown decision requirement: {decision.decision_id}")
+    allowed_options = [requirement.recommended_option, *requirement.alternative_options]
+    if decision.selected_option not in allowed_options:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Selected option must be one of: {', '.join(allowed_options)}",
+        )
+    known_roles = {role.role_id for role in coordination.roles} | {role.name for role in coordination.roles}
+    if decision.reviewer_role is not None and decision.reviewer_role not in known_roles:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Reviewer role must be one of the assigned coordination roles: {', '.join(sorted(known_roles))}",
+        )
+    recorded = HumanDecision(
+        decision_id=requirement.decision_id,
+        status="recorded",
+        recommended_option=requirement.recommended_option,
+        selected_option=decision.selected_option,
+        reviewer_role=decision.reviewer_role,
+        note=decision.note,
+        recorded_state="decision_recorded",
+        recorded_at=datetime.now(timezone.utc),
+    )
+    _decisions[requirement.decision_id] = recorded
+    return recorded

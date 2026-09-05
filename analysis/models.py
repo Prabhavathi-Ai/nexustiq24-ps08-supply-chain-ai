@@ -1,6 +1,6 @@
 """Typed deterministic impact-analysis results."""
 
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -29,7 +29,7 @@ class EvidenceReference(BaseModel):
     field: str
     value: str
     relationship: str
-    source_stage: Literal["understanding", "matching", "impact", "prioritization", "recommendation", "movement"]
+    source_stage: Literal["understanding", "matching", "impact", "prioritization", "recommendation", "movement", "coordination"]
 
 
 class ImpactRecord(BaseModel):
@@ -258,6 +258,70 @@ class ShipmentMovementResponse(BaseModel):
     affected_shipment_ids: list[str] = Field(default_factory=list)
     unknown_shipment_ids: list[str] = Field(default_factory=list)
     exposures: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    evidence_references: list[EvidenceReference] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ResponseRole(BaseModel):
+    """A deterministic reviewer assignment grounded in established impact and priority evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role_id: str
+    name: str
+    responsibility: str
+    reason: str
+    priority: int
+    related_order_ids: list[str] = Field(default_factory=list)
+    related_shipment_ids: list[str] = Field(default_factory=list)
+    evidence_references: list[EvidenceReference] = Field(default_factory=list)
+
+
+class DecisionRequirement(BaseModel):
+    """A decision the human reviewer must record before any option is executed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision_id: str
+    decision_type: str
+    question: str
+    recommended_option: str
+    alternative_options: list[str] = Field(default_factory=list)
+    rationale: list[str] = Field(default_factory=list)
+    evidence_references: list[EvidenceReference] = Field(default_factory=list)
+
+
+class HumanDecision(BaseModel):
+    """Recorded gate state: the system recommends, the human decides, the system never executes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision_id: str
+    status: Literal["pending", "recorded"]
+    recommended_option: str | None = None
+    selected_option: str | None = None
+    reviewer_role: str | None = None
+    note: str | None = None
+    recorded_state: Literal["pending_human_decision", "decision_recorded"]
+    recorded_at: datetime | None = None
+
+
+class ResponseCoordinationResponse(BaseModel):
+    """Deterministic coordination plan: reviewers, required decisions, and the human decision gate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    disruption_id: str
+    coordination_state: Literal[
+        "response_coordination_required",
+        "no_response_coordination_required",
+        "insufficient_information",
+    ]
+    roles: list[ResponseRole] = Field(default_factory=list)
+    decision_requirements: list[DecisionRequirement] = Field(default_factory=list)
+    human_decision: HumanDecision | None = None
+    recommended_next_step: str
     evidence: list[str] = Field(default_factory=list)
     evidence_references: list[EvidenceReference] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
