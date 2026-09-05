@@ -13,7 +13,9 @@ from analysis.models import (
     ImpactResponse,
     OperationalAnalyticsResponse,
     PrioritizationResponse,
+    ShipmentMovementResponse,
 )
+from analysis.movement import build_shipment_movement
 from analysis.prioritization import prioritize_orders
 from analysis.recommendations import build_action_plan
 from gemini.errors import GeminiExtractionError
@@ -193,3 +195,18 @@ def analyze_disruption_analytics(disruption_id: str) -> OperationalAnalyticsResp
     matching = match_understanding(disruption_id, understanding, data)
     impact = analyze_impact(disruption_id, matching, data)
     return build_operational_analytics(disruption_id, impact, data)
+
+
+@router.post("/{disruption_id}/movement", response_model=ShipmentMovementResponse)
+def shipment_movement_evidence(disruption_id: str) -> ShipmentMovementResponse:
+    """Return deterministic route/movement evidence for affected shipments from committed records only."""
+
+    if disruption_id not in _disruptions:
+        raise HTTPException(status_code=404, detail=f"Disruption not found: {disruption_id}")
+    understanding = _understandings.get(disruption_id)
+    if understanding is None:
+        raise HTTPException(status_code=409, detail="Disruption understanding is not available")
+    data = load_sample_data()
+    matching = match_understanding(disruption_id, understanding, data)
+    impact = analyze_impact(disruption_id, matching, data)
+    return build_shipment_movement(disruption_id, impact, data)

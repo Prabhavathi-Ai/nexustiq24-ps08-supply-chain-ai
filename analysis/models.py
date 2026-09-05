@@ -29,7 +29,7 @@ class EvidenceReference(BaseModel):
     field: str
     value: str
     relationship: str
-    source_stage: Literal["understanding", "matching", "impact", "prioritization", "recommendation"]
+    source_stage: Literal["understanding", "matching", "impact", "prioritization", "recommendation", "movement"]
 
 
 class ImpactRecord(BaseModel):
@@ -201,4 +201,63 @@ class OperationalAnalyticsResponse(BaseModel):
     shipments: ShipmentStatistics
     disruptions: DisruptionStatistics
     investigation: InvestigationStatistics
+    warnings: list[str] = Field(default_factory=list)
+
+
+class MovementExposure(BaseModel):
+    """Whether a shipment's committed planned route passes through a matched disruption location."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    exposed: bool
+    on_route_disruption_locations: list[str] = Field(default_factory=list)
+    basis: str
+
+
+class ShipmentMovementEvidence(BaseModel):
+    """Deterministic movement evidence for one affected shipment, from committed records only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    shipment_id: str
+    route_id: str
+    sku_id: str
+    container_id: str
+    origin: str
+    destination: str
+    route_path: list[str] = Field(default_factory=list)
+    shipment_status: str
+    container_status: str | None = None
+    planned_departure: date | None = None
+    planned_arrival: date | None = None
+    exposure: MovementExposure
+    source_records: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    evidence_references: list[EvidenceReference] = Field(default_factory=list)
+
+
+class MovementDataAvailability(BaseModel):
+    """Honesty state describing how much movement information the committed dataset provides."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["available", "unavailable"]
+    live_tracking: bool = False
+    current_position_available: bool = False
+    note: str
+
+
+class ShipmentMovementResponse(BaseModel):
+    """Movement evidence for the affected shipments of one disruption investigation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    disruption_id: str
+    availability: MovementDataAvailability
+    shipments: list[ShipmentMovementEvidence] = Field(default_factory=list)
+    affected_shipment_ids: list[str] = Field(default_factory=list)
+    unknown_shipment_ids: list[str] = Field(default_factory=list)
+    exposures: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    evidence_references: list[EvidenceReference] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
