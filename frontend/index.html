@@ -117,6 +117,13 @@
     .flow-strip i { font-style: normal; color: #9ecfc0; }
     .pending-flag { border-left: 4px solid var(--warn); background: #fff3df; padding: 12px 14px; margin: 0 0 16px; font-family: Arial, sans-serif; font-size: 14px; }
     .pending-flag b { text-transform: uppercase; font-size: 12px; letter-spacing: .08em; }
+    .scenario-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-family: Arial, sans-serif; }
+    .scenario-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 10px 0; }
+    .scenario-metrics span { background: #eef4ef; padding: 9px 11px; }
+    .scenario-metrics small { display: block; color: var(--muted); font: 11px Arial, sans-serif; text-transform: uppercase; letter-spacing: .05em; }
+    .scenario-metrics strong { display: block; margin-top: 4px; font: 700 15px Arial, sans-serif; }
+    .scenario-trade { margin: 9px 0; }
+    .scenario-trade b { display: block; margin-bottom: 2px; font: 700 11px Arial, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-dark); }
     @media (max-width: 820px) { .summary-grid { grid-template-columns: repeat(3, 1fr); } }
     @media (max-width: 600px) { main { padding: 24px 16px 48px; } header { padding: 18px 16px; } .header-meta { display: none; } .panel { padding: 18px; } .wizard-step { text-align: left; } .summary-grid { grid-template-columns: repeat(2, 1fr); } .role-layout { grid-template-columns: 1fr; } .case-card { align-items: flex-start; flex-direction: column; } .flow-strip { gap: 6px; font-size: 11px; } .detail-toggle summary { font-size: 12px; } .verdict { padding: 14px 16px; } }
   </style>
@@ -252,6 +259,32 @@
         return `<div class="impact-group"><h2>Shipment movement evidence</h2><div class="notice"><strong>Route & movement evidence</strong><p class="data-note">${ESCAPE(movement.availability.note)}</p></div>${(movement.shipments || []).length ? `<div class="priority-list">${movementItems(movement)}</div>` : `<div class="banner no-match">${ESCAPE(movement.availability.note)}</div>`}${(movement.unknown_shipment_ids || []).length ? `<div class="banner">No committed shipment record for: ${list(movement.unknown_shipment_ids)}.</div>` : ''}${(movement.warnings || []).map(warning => `<div class="banner">${ESCAPE(warning)}</div>`).join('')}</div>`;
       };
 
+      const scenarioPanelHTML = data => {
+        const meta = data.scenarios;
+        if (!meta || !meta.scenarios || !meta.scenarios.length) {
+          return `<div class="impact-group"><h2>What-if scenarios</h2><div class="banner no-match">Scenario comparison unavailable from current operational data.</div></div>`;
+        }
+        const flow = '<div class="flow-strip"><span>Scenario simulation</span><i>\u2192</i><span>Operator reviews trade-offs</span><i>\u2192</i><span>Human decision</span><i>\u2192</i><span>Decision recorded</span><i>\u2192</i><span>Nothing executed automatically</span></div>';
+        const cards = meta.scenarios.map((scenario, index) => {
+          const m = scenario.metrics;
+          const badge = scenario.is_recommended ? '<span class="status-badge">Recommended by investigation</span>' : '<span class="status-badge">Alternative</span>';
+          const metricRow = (label, value) => value === null || value === undefined ? '' : `<span><small>${label}</small><strong>${ESCAPE(value)}</strong></span>`;
+          const metrics = [
+            ['Orders covered', `${m.affected_orders_covered} of ${m.affected_orders_total}`],
+            ['Customers covered', `${m.affected_customers_covered} of ${m.affected_customers_total}`],
+            ['Shipments in scope', `${m.affected_shipments_covered} of ${m.affected_shipments_total}`],
+            ['Priority orders', `${m.priority_orders_covered} of ${m.priority_orders_total}`],
+            ['Ordered quantity in scope', m.order_quantity_covered],
+            ['Shortage in scope', m.shortage_quantity_covered],
+            ['Available inventory for covered SKUs', m.available_inventory_for_covered_skus],
+          ].map(([label, value]) => metricRow(label, value)).join('');
+          const tradeBlock = (title, items) => items && items.length ? `<div class="scenario-trade"><b>${title}</b><div class="priority-meta">${list(items)}</div></div>` : '';
+          const scope = m.covered_order_ids && m.covered_order_ids.length ? `<div class="priority-meta">Covered orders: ${list(m.covered_order_ids)} \u00b7 Customers: ${list(m.covered_customer_ids)} \u00b7 Shipments: ${list(m.covered_shipment_ids)}</div>` : '';
+          return `<details class="detail-toggle scenario" data-scenario="${index}"><summary><span class="scenario-summary">${badge}<strong>${ESCAPE(scenario.name)}</strong></span></summary><div class="detail-body"><p>${ESCAPE(scenario.description)}</p><div class="scenario-metrics">${metrics}</div>${scope}${tradeBlock('What it addresses', scenario.addresses)}${tradeBlock('What it does not address', scenario.does_not_address)}${tradeBlock('Operational trade-off', scenario.operational_trade_offs)}${tradeBlock('Prerequisites', scenario.prerequisites)}${tradeBlock('Evidence', scenario.evidence)}${evidenceRefs(scenario.evidence_references)}<p class="data-note"><b>${ESCAPE(scenario.execution_notice)}</b> ${scenario.is_recommended ? ESCAPE(scenario.advisory_notice) : ''}</p></div></details>`;
+        }).join('');
+        return `<div class="impact-group"><h2>What-if scenario comparison</h2>${flow}<p class="data-note">${ESCAPE(meta.comparison_note)}</p><div class="priority-list">${cards}</div><p class="data-note">Selecting a scenario for closer review does not record a decision and does not execute anything.</p>${(meta.warnings || []).map(warning => `<div class="banner">${ESCAPE(warning)}</div>`).join('')}</div>`;
+      };
+
       const recordsList = matches => {
         const cards = [...matches.suppliers.map(x => ['Supplier', x]), ...matches.shipments.map(x => ['Shipment', x]), ...matches.containers.map(x => ['Container', x]), ...matches.routes.map(x => ['Route', x]), ...matches.skus.map(x => ['SKU', x])];
         return `<h3>Matched records</h3><p class="data-note">Committed records matched to the notice, each with its reason.</p><div class="records">${cards.map(([title, card]) => `<article class="record"><h3>${ESCAPE(title)}</h3><strong>${ESCAPE(card.entity_name)}</strong><p>${ESCAPE(card.entity_id)}</p><p class="reason"><b>Why:</b> ${ESCAPE(card.match_reason)}</p>${card.source_fact ? `<p class="reason">Fact: ${ESCAPE(card.source_fact)}</p>` : ''}</article>`).join('')}</div>${matches.match_status === 'no_match' ? '<div class="banner no-match">No matching supply-chain records found.</div>' : ''}${matches.evidence && matches.evidence.length ? `<h3>Evidence</h3><ul>${matches.evidence.map(ESCAPE).map(item => `<li>${item}</li>`).join('')}</ul>` : ''}`;
@@ -284,7 +317,7 @@
       const stepResponse = data => {
         const ap = data.actionPlan;
         const options = ap.options.map(option => `<article class="action-option ${option.option_id === ap.recommended_option_id ? 'recommended' : ''}"><strong>${ESCAPE(option.name)}</strong><p>${ESCAPE(option.description)}</p><p><b>Suitability:</b> ${ESCAPE(option.suitability)}</p><p><b>Trade-offs:</b> ${list(option.trade_offs)}</p><p><b>Risks:</b> ${list(option.risks)}</p><p><b>Prerequisites:</b> ${list(option.prerequisites)}</p><p><b>Evidence:</b> ${list(option.evidence)}</p>${evidenceRefs(option.evidence_references)}</article>`).join('');
-        return `<div class="impact-group"><h2>Recommended response</h2><div class="notice"><strong>Recommended course</strong>${ESCAPE(ap.recommended_course)}</div><p><b>Why:</b> ${list(ap.why)}</p><div class="banner"><b>SYSTEM RECOMMENDATION \u2014 Human decision required</b><br>${ESCAPE(ap.operator_decision_required)}</div>${ap.options.length ? `<h3>Alternative options</h3>${options}` : '<div class="banner no-match">No action recommendation is made because no operational impact was established.</div>'}</div>`;
+        return `<div class="impact-group"><h2>Recommended response</h2><div class="notice"><strong>Recommended course</strong>${ESCAPE(ap.recommended_course)}</div><p><b>Why:</b> ${list(ap.why)}</p><div class="banner"><b>SYSTEM RECOMMENDATION \u2014 Human decision required</b><br>${ESCAPE(ap.operator_decision_required)}</div>${ap.options.length ? `<h3>Alternative options</h3>${options}` : '<div class="banner no-match">No action recommendation is made because no operational impact was established.</div>'}</div>${scenarioPanelHTML(data)}`;
       };
 
       const allRecorded = cs => {
@@ -435,7 +468,9 @@
           const movement = await request(`/api/disruptions/${disruption.disruption_id}/movement`, { method: 'POST' });
           setStatus('Building response coordination...');
           const coordination = await request(`/api/disruptions/${disruption.disruption_id}/coordination`, { method: 'POST' });
-          session.data[cs.key] = { disruption, understood, matches, impact, priorities, actionPlan, analytics, movement, coordination };
+          setStatus('Simulating what-if scenarios...');
+          const scenarios = impact.impact_state === 'no_impact' ? null : await request(`/api/disruptions/${disruption.disruption_id}/scenarios`, { method: 'POST' });
+          session.data[cs.key] = { disruption, understood, matches, impact, priorities, actionPlan, analytics, movement, coordination, scenarios };
           cs.lastAnalytics = analytics;
           if (cs.kind === 'custom') {
             const facts = understood.understanding;

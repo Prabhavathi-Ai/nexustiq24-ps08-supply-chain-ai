@@ -121,6 +121,70 @@ class ActionPlanResponse(BaseModel):
     evidence_references: list[EvidenceReference] = Field(default_factory=list)
 
 
+class ScenarioComparisonMetrics(BaseModel):
+    """Operational scope of one what-if scenario, derived only from committed records."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    affected_orders_covered: int
+    affected_orders_total: int
+    affected_customers_covered: int
+    affected_customers_total: int
+    affected_shipments_covered: int
+    affected_shipments_total: int
+    priority_orders_covered: int
+    priority_orders_total: int
+    order_quantity_covered: int
+    shortage_quantity_covered: int | None = None
+    available_inventory_for_covered_skus: int | None = None
+    shortage_incomplete: bool = False
+    inventory_incomplete: bool = False
+    covered_order_ids: list[str] = Field(default_factory=list)
+    covered_customer_ids: list[str] = Field(default_factory=list)
+    covered_shipment_ids: list[str] = Field(default_factory=list)
+    covered_sku_ids: list[str] = Field(default_factory=list)
+
+
+class WhatIfScenario(BaseModel):
+    """A deterministic what-if wrapper around one supported response option."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scenario_id: str
+    option_id: str
+    name: str
+    description: str
+    is_recommended: bool = False
+    addresses: list[str] = Field(default_factory=list)
+    does_not_address: list[str] = Field(default_factory=list)
+    operational_trade_offs: list[str] = Field(default_factory=list)
+    prerequisites: list[str] = Field(default_factory=list)
+    metrics: ScenarioComparisonMetrics
+    evidence: list[str] = Field(default_factory=list)
+    evidence_references: list[EvidenceReference] = Field(default_factory=list)
+    execution_status: Literal["simulation_only"]
+    execution_notice: str
+    advisory_notice: str
+
+
+class ScenarioComparisonResponse(BaseModel):
+    """Deterministic cross-scenario comparison that simulates nothing externally."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    disruption_id: str
+    simulation_state: Literal[
+        "scenario_comparison_available",
+        "no_scenario_created",
+        "insufficient_information",
+    ]
+    recommended_scenario_id: str | None = None
+    scenarios: list[WhatIfScenario] = Field(default_factory=list)
+    comparison_note: str
+    evidence: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class OrderQuantityStatistics(BaseModel):
     """Descriptive statistics over active order records in the committed dataset."""
 

@@ -16,11 +16,13 @@ from analysis.models import (
     OperationalAnalyticsResponse,
     PrioritizationResponse,
     ResponseCoordinationResponse,
+    ScenarioComparisonResponse,
     ShipmentMovementResponse,
 )
 from analysis.movement import build_shipment_movement
 from analysis.prioritization import prioritize_orders
 from analysis.recommendations import build_action_plan
+from analysis.scenarios import build_scenario_comparison
 from gemini.errors import GeminiExtractionError
 from gemini.extraction import extract_understanding
 from gemini.models import DisruptionUnderstanding
@@ -252,6 +254,14 @@ def coordinate_disruption_response(disruption_id: str) -> ResponseCoordinationRe
 
     impact, priorities, plan, data = _coordination_context(disruption_id)
     return build_response_coordination(disruption_id, impact, priorities, plan, data, decided=_decisions)
+
+
+@router.post("/{disruption_id}/scenarios", response_model=ScenarioComparisonResponse)
+def simulate_disruption_scenarios(disruption_id: str) -> ScenarioComparisonResponse:
+    """Return a deterministic comparison of supported what-if scenarios without executing anything."""
+
+    impact, priorities, plan, data = _coordination_context(disruption_id)
+    return build_scenario_comparison(disruption_id, impact, priorities, plan, data)
 
 
 @router.post("/{disruption_id}/decision", response_model=HumanDecision)
