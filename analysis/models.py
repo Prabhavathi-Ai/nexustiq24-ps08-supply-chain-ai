@@ -389,3 +389,73 @@ class ResponseCoordinationResponse(BaseModel):
     evidence: list[str] = Field(default_factory=list)
     evidence_references: list[EvidenceReference] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+CaseLifecycleState = Literal[
+    "new",
+    "investigating",
+    "awaiting_decisions",
+    "decision_recorded",
+    "closed",
+    "no_action_required",
+]
+
+
+class CaseTimelineEntry(BaseModel):
+    """One genuine stage marker in a case history; timestamps are never fabricated."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stage: str
+    label: str
+    timestamp: datetime | None = None
+    evidence_references: list[EvidenceReference] = Field(default_factory=list)
+
+
+class DecisionAudit(BaseModel):
+    """Audit view of one decision requirement referencing the existing decision state."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision_id: str
+    requirement_id: str
+    decision_type: str
+    assigned_reviewer_role_id: str | None = None
+    assigned_reviewer_role: str | None = None
+    recommended_option: str | None = None
+    selected_option: str | None = None
+    reviewer_role: str | None = None
+    review_note: str | None = None
+    decision_status: Literal["pending", "recorded"]
+    decided_at: datetime | None = None
+    evidence_references: list[EvidenceReference] = Field(default_factory=list)
+    execution_status: Literal["not_executed"]
+
+
+class CaseClosure(BaseModel):
+    """A genuine operator case-close record; closing never executes an action."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    disruption_id: str
+    closed_at: datetime
+    reviewer_role: str | None = None
+    note: str | None = None
+
+
+class CaseStatusResponse(BaseModel):
+    """Deterministic case lifecycle, decision audit, and investigation timeline."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    disruption_id: str
+    lifecycle_state: CaseLifecycleState
+    requires_decisions: bool
+    decision_progress: dict[str, int] = Field(default_factory=dict)
+    roles: list[ResponseRole] = Field(default_factory=list)
+    decision_requirements: list[DecisionRequirement] = Field(default_factory=list)
+    decision_audit: list[DecisionAudit] = Field(default_factory=list)
+    timeline: list[CaseTimelineEntry] = Field(default_factory=list)
+    close: CaseClosure | None = None
+    execution_status: Literal["not_executed"]
+    warnings: list[str] = Field(default_factory=list)

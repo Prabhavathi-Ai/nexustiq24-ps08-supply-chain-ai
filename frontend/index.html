@@ -157,6 +157,8 @@
       <div id="exceptions-list"></div>
       <div class="section-label">Your decisions</div>
       <div id="my-decisions"></div>
+      <div class="section-label">Recent cases</div>
+      <div id="recent-cases"></div>
       <p class="data-note" id="tower-note"></p>
     </section>
 
@@ -196,6 +198,26 @@
         'confirm-shipment-review': 'logistics_transportation',
         'resolve-inventory-review': 'inventory_warehouse',
         'confirm-customer-communication': 'customer_service',
+      };
+      const LIFECYCLE_META = {
+        new: { label: 'New \u2014 notice accepted', tone: 'active' },
+        investigating: { label: 'Investigating', tone: 'active' },
+        awaiting_decisions: { label: 'Awaiting human decisions', tone: 'active' },
+        decision_recorded: { label: 'Decision recorded \u2014 ready to close', tone: 'complete' },
+        closed: { label: 'Closed', tone: 'complete' },
+        no_action_required: { label: 'No action required', tone: 'no-impact' },
+      };
+      const lifecycleMeta = cs => {
+        const status = cs.caseStatus;
+        if (status && LIFECYCLE_META[status.lifecycle_state]) return LIFECYCLE_META[status.lifecycle_state];
+        if (cs.status === 'no_impact') return LIFECYCLE_META.no_action_required;
+        if (cs.status === 'complete') return LIFECYCLE_META.decision_recorded;
+        if (cs.status === 'in_progress') return LIFECYCLE_META.investigating;
+        return LIFECYCLE_META.new;
+      };
+      const lifecycleBadge = cs => {
+        const meta = lifecycleMeta(cs);
+        return `<span class="status-badge${meta.tone === 'no-impact' ? ' no-impact' : ''}">${meta.label}</span>`;
       };
       const STEP_LABELS = ['DISRUPTION', 'IMPACT', 'PRIORITIES', 'RESPONSE', 'DECISION'];
       const STEP_GUIDES = [
@@ -355,7 +377,7 @@
               : `<div class="pending-flag"><b>Awaiting ${pending} human decision${pending === 1 ? '' : 's'}</b> \u2014 ${recCount} of ${reqs.length} requirements are recorded. The case stays open until every assigned reviewer records a decision. The system will not execute anything on its own.</div>`)
           : '<div class="banner no-match">No human decision is required for this case.</div>';
         const flow = '<div class="flow-strip"><span>System recommends</span><i>\u2192</i><span>Assigned human reviews</span><i>\u2192</i><span>Human records decision</span><i>\u2192</i><span>Decision is recorded</span><i>\u2192</i><span>Nothing executes automatically</span></div>';
-        return `<div class="impact-group"><h2>Human approval required</h2>${flow}${session.lastRecordNote ? `<div class="banner">${ESCAPE(session.lastRecordNote)}</div>` : ''}${statusBlock}${reqs.length ? `<div class="priority-list">${cards}</div>` : ''}<details class="detail-toggle"><summary>Review coordination details</summary><div class="detail-body"><h3>Reviewers</h3><div class="priority-list">${roleList}</div><p class="data-note">The coordination layer is demo output: it assigns reviewers and records decisions deterministically from committed evidence. It never sends messages, places orders, or changes operational records.</p>${coordination.evidence_references && coordination.evidence_references.length ? `<small class="priority-meta">Evidence: ${coordination.evidence_references.map(ref => `${ESCAPE(ref.evidence_id)} (${ESCAPE(ref.entity_type)} ${ESCAPE(ref.record_id)}.${ESCAPE(ref.field)} = ${ESCAPE(ref.value)})`).join(' | ')}</small>` : ''}</div></details></div>`;
+        return `<div class="impact-group"><h2>Human approval required</h2>${flow}${session.lastRecordNote ? `<div class="banner">${ESCAPE(session.lastRecordNote)}</div>` : ''}${statusBlock}${reqs.length ? `<div class="priority-list">${cards}</div>` : ''}<details class="detail-toggle"><summary>Review coordination details</summary><div class="detail-body"><h3>Reviewers</h3><div class="priority-list">${roleList}</div><p class="data-note">The coordination layer is demo output: it assigns reviewers and records decisions deterministically from committed evidence. It never sends messages, places orders, or changes operational records.</p>${coordination.evidence_references && coordination.evidence_references.length ? `<small class="priority-meta">Evidence: ${coordination.evidence_references.map(ref => `${ESCAPE(ref.evidence_id)} (${ESCAPE(ref.entity_type)} ${ESCAPE(ref.record_id)}.${ESCAPE(ref.field)} = ${ESCAPE(ref.value)})`).join(' | ')}</small>` : ''}</div></details>${auditTrailHTML()}</div>`;
       };
 
       const completionView = () => {
@@ -363,7 +385,12 @@
         const data = forData(cs.key);
         const reqs = data.coordination.decision_requirements || [];
         const recCount = reqs.filter(req => cs.decisions[req.decision_id] && cs.decisions[req.decision_id].status === 'recorded').length;
-        return `<div class="verdict"><div class="eyebrow">Final state</div><h2>Investigation complete</h2><p class="data-note">${ESCAPE(cs.name)}</p><div class="notice"><strong>${recCount} / ${reqs.length} decisions recorded</strong><p>All required human decisions have been recorded.</p></div><ul class="completion-list"><li>\u2713 Impact investigated</li><li>\u2713 Orders prioritized</li><li>\u2713 Response reviewed</li><li>\u2713 Human decisions recorded</li></ul></div><div class="banner"><b>No operational action was executed automatically.</b><br>Decisions are recorded for operator review only. The system did not send messages, place orders, or change operational records.</div><button type="button" class="link-button" data-action="tower">Return to Control Tower</button>`;
+        const status = cs.caseStatus;
+        const closed = status && status.lifecycle_state === 'closed';
+        const terminal = closed
+          ? { eyebrow: 'Case closed', headline: 'Case closed', note: 'Human decision recorded; no operational action was executed by the system.' }
+          : { eyebrow: 'Final state', headline: 'Investigation complete', note: 'All required human decisions have been recorded; the case is ready to close. Nothing was executed automatically.' };
+        return `<div class="verdict"><div class="eyebrow">${terminal.eyebrow}</div><h2>${terminal.headline}</h2><p class="data-note">${ESCAPE(cs.name)}</p><div class="notice"><strong>${closed ? 'Case closed' : `${recCount} / ${reqs.length} decisions recorded`}</strong><p>${terminal.note}</p></div><ul class="completion-list"><li>\u2713 Impact investigated</li><li>\u2713 Orders prioritized</li><li>\u2713 Response reviewed</li><li>\u2713 Human decisions recorded</li></ul></div><div class="banner"><b>${closed ? 'Case closed \u2014 no operational action was executed by the system.' : 'Decision recorded \u2014 nothing was executed automatically.'}</b><br>Decisions are recorded for operator review only. The system did not send messages, place orders, or change operational records.</div>${auditTrailHTML()}<button type="button" class="link-button" data-action="tower">Return to Control Tower</button>`;
       };
 
       const noImpactView = () => {
@@ -372,7 +399,7 @@
         const details = data
           ? `<details class="detail-toggle"><summary>Inspect investigation details</summary><div class="detail-body">${chainHTML(data.impact, data.matches, data.understood)}${recordsList(data.matches)}${analyticsPanelHTML(data)}</div></details>`
           : '';
-        return `<div class="verdict"><div class="eyebrow">Final state</div><h2>No impact</h2><p class="data-note">${ESCAPE(cs.name)}</p><ul class="completion-list"><li>\u2713 The disruption notice was understood.</li><li>\u2713 No pending operational records matched it, so no supply-chain exposure was established.</li><li>\u2713 No response coordination is required and no decisions were created.</li></ul><div class="summary-grid"><div class="summary-card"><small>Affected shipments</small><strong>0</strong></div><div class="summary-card"><small>Affected orders</small><strong>0</strong></div><div class="summary-card"><small>Affected customers</small><strong>0</strong></div></div></div><p class="data-note">Nothing was executed automatically.</p>${details}<button type="button" class="link-button" data-action="tower">Return to Control Tower</button>`;
+        return `<div class="verdict"><div class="eyebrow">Final state</div><h2>No impact</h2><p class="data-note">${ESCAPE(cs.name)}</p><ul class="completion-list"><li>\u2713 The disruption notice was understood.</li><li>\u2713 No pending operational records matched it, so no supply-chain exposure was established.</li><li>\u2713 No response coordination is required and no decisions were created.</li></ul><div class="summary-grid"><div class="summary-card"><small>Affected shipments</small><strong>0</strong></div><div class="summary-card"><small>Affected orders</small><strong>0</strong></div><div class="summary-card"><small>Affected customers</small><strong>0</strong></div></div></div><p class="data-note">Nothing was executed automatically.</p>${auditTrailHTML()}${details}<button type="button" class="link-button" data-action="tower">Return to Control Tower</button>`;
       };
 
       const renderStepBar = currentStep => {
@@ -442,6 +469,45 @@
         el('wizard-nav').innerHTML = '';
       };
 
+      // ---- Case lifecycle helpers ----
+      const refreshCase = async cs => {
+        const data = forData(cs.key);
+        if (!data) return;
+        try {
+          cs.caseStatus = await request(`/api/disruptions/${data.disruption.disruption_id}/case`, { method: 'GET' });
+        } catch (error) {
+          cs.caseStatus = null;
+        }
+      };
+
+      const auditTrailHTML = () => {
+        const cs = currentCase();
+        const status = cs.caseStatus;
+        if (!status) return '<details class="detail-toggle"><summary>Decision audit &amp; case history</summary><div class="detail-body"><p class="data-note">Case history is not available for this case yet.</p></div></details>';
+        const progress = status.decision_progress || {};
+        const audit = (status.decision_audit || []).map(entry => `<div class="impact-item"><strong>${ESCAPE(entry.decision_type)}</strong> <span class="dec-pill ${entry.decision_status === 'recorded' ? 'recorded' : 'pending'}">${entry.decision_status === 'recorded' ? 'Recorded' : 'Pending'}</span><div class="priority-meta">Assigned role: ${ESCAPE(entry.assigned_reviewer_role || '\u2014')} \u00b7 Recommended: ${ESCAPE(entry.recommended_option || '\u2014')}</div>${entry.selected_option ? `<p>Selected: ${ESCAPE(entry.selected_option)}</p>` : ''}${entry.reviewer_role ? `<p>Reviewer: ${ESCAPE(entry.reviewer_role)}</p>` : ''}${entry.review_note ? `<p>Note: ${ESCAPE(entry.review_note)}</p>` : ''}${entry.decided_at ? `<p>Recorded: ${ESCAPE(entry.decided_at)}</p>` : ''}<p class="data-note">Execution status: ${ESCAPE(entry.execution_status)} \u2014 nothing was executed automatically.</p></div>`).join('');
+        const timeline = (status.timeline || []).map(entry => `<li><b>${ESCAPE(entry.label)}</b>${entry.timestamp ? `<span class="priority-meta"> \u00b7 ${ESCAPE(entry.timestamp)}</span>` : ''}</li>`).join('');
+        const closeBlock = status.close ? `<p class="priority-meta">Case closed ${ESCAPE(status.close.closed_at)}${status.close.reviewer_role ? ` by ${ESCAPE(status.close.reviewer_role)}` : ''}${status.close.note ? ` \u00b7 ${ESCAPE(status.close.note)}` : ''}</p>` : '';
+        const closeButton = status.lifecycle_state === 'decision_recorded' ? '<button type="button" class="link-button" data-action="close">Close Case</button>' : '';
+        return `<details class="detail-toggle"><summary>Decision audit &amp; case history</summary><div class="detail-body"><div class="verdict-facts"><span>Lifecycle: <b>${ESCAPE(status.lifecycle_state.replaceAll('_', ' '))}</b></span><span>Decisions: <b>${progress.recorded || 0} of ${progress.required || 0} recorded</b></span><span>Execution: <b>${ESCAPE(status.execution_status)}</b></span></div>${closeBlock}<h3>Decision audit</h3><div class="priority-list">${audit || '<p class="data-note">No decision requirements were established for this case.</p>'}</div><h3>Investigation timeline</h3><ul class="completion-list">${timeline}</ul><p class="data-note">${status.warnings.map(ESCAPE).join(' ')}</p>${closeButton}</div></details>`;
+      };
+
+      const closeCase = async () => {
+        const cs = currentCase();
+        const data = forData(cs.key);
+        if (!data) return;
+        setStatus('Closing case...');
+        try {
+          const result = await request(`/api/disruptions/${data.disruption.disruption_id}/close`, { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ reviewer_role: null, note: null }) });
+          cs.caseStatus = result;
+          cs.status = 'closed';
+          renderCompletion();
+        } catch (error) {
+          setStatus(error && error.message ? error.message : 'The case could not be closed.');
+          renderStep(4);
+        }
+      };
+
       // ---- Investigation run ----
       const runInvestigation = async () => {
         const cs = currentCase();
@@ -472,6 +538,7 @@
           const scenarios = impact.impact_state === 'no_impact' ? null : await request(`/api/disruptions/${disruption.disruption_id}/scenarios`, { method: 'POST' });
           session.data[cs.key] = { disruption, understood, matches, impact, priorities, actionPlan, analytics, movement, coordination, scenarios };
           cs.lastAnalytics = analytics;
+          await refreshCase(cs);
           if (cs.kind === 'custom') {
             const facts = understood.understanding;
             const loc = (facts.locations || [])[0] || 'Unknown';
@@ -513,6 +580,7 @@
           if (!recorded || recorded.status !== 'recorded') throw new Error('The decision was not recorded.');
           cs.decisions[requirement.decision_id] = recorded;
           session.lastRecordNote = `Decision recorded \u2014 not executed. Selected: ${recorded.selected_option}.`;
+          await refreshCase(cs);
           if (allRecorded(cs)) { renderCompletion(); } else { renderStep(4); }
         } catch (error) {
           if (outcome) { outcome.textContent = error && error.message ? error.message : 'Could not record the decision.'; outcome.className += ' error'; }
@@ -577,13 +645,25 @@ const pill = recorded && recorded.status === 'recorded' ? '<span class="dec-pill
         host.innerHTML = rows || `<p class="data-note">${session.role === 'operations_manager' ? 'You coordinate all decisions. Open an exception to review them.' : 'No decisions are currently assigned to this role.'}</p>`;
       };
 
+      const renderCaseHistory = () => {
+        const host = el('recent-cases');
+        const rows = Object.values(CASES).map(cs => {
+          const status = cs.caseStatus;
+          const progress = status && status.decision_progress ? `${status.decision_progress.recorded || 0} of ${status.decision_progress.required || 0} decisions recorded` : 'No investigation yet';
+          const execution = status ? ` \u00b7 Execution: ${ESCAPE(status.execution_status)}` : '';
+          return `<div class="case-card"><div>${lifecycleBadge(cs)}<h2>${ESCAPE(cs.name)}</h2><p>${ESCAPE(cs.location)} \u00b7 ${progress}${execution}</p></div><button type="button" class="link-button" data-action="open" data-case="${cs.key}">Open case</button></div>`;
+        }).join('');
+        host.innerHTML = rows || '<p class="data-note">No cases created yet.</p>';
+      };
+
       const renderTower = () => {
         el('tower-role').textContent = ROLES[session.role].name;
         el('header-role').textContent = ROLES[session.role].name;
         renderKpis();
         el('exceptions-list').innerHTML = Object.values(CASES).map(caseCardHTML).join('');
         renderMyDecisions();
-        el('tower-note').textContent = 'The application does not expose committed-dataset totals, so summary counts come only from the latest investigation of this session and the known exception cases. Decision status reflects decisions recorded through the application API; the system records recommendations and never executes operational actions.';
+        renderCaseHistory();
+        el('tower-note').textContent = 'The application does not expose committed-dataset totals, so summary counts come only from the latest investigation of this session and the known exception cases. Decision status reflects decisions recorded through the application API; case lifecycle state is derived from the stages the investigation actually completed, and the system records recommendations and never executes operational actions.';
         showScreen('screen-tower');
       };
 
@@ -636,6 +716,7 @@ const pill = recorded && recorded.status === 'recorded' ? '<span class="dec-pill
         else if (action === 'tower') { renderTower(); }
         else if (action === 'report') { openCase(reportCase()); }
         else if (action === 'open') { openCase(target.getAttribute('data-case'), target.getAttribute('data-step') !== null ? Number(target.getAttribute('data-step')) : undefined); }
+        else if (action === 'close') { closeCase(); }
         else if (action === 'back') { renderStep(Math.max(0, session.step - 1)); }
         else if (action === 'next') { renderStep(Math.min(4, session.step + 1)); }
         else if (action === 'retry') { runInvestigation(); }

@@ -7,10 +7,13 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from analysis.analytics import build_operational_analytics
+from analysis.case import build_case_status
 from analysis.coordination import build_response_coordination
 from analysis.impact import analyze_impact
 from analysis.models import (
     ActionPlanResponse,
+    CaseClosure,
+    CaseStatusResponse,
     HumanDecision,
     ImpactResponse,
     OperationalAnalyticsResponse,
@@ -66,6 +69,18 @@ router = APIRouter(prefix="/api/disruptions", tags=["disruptions"])
 _disruptions: dict[str, DisruptionNoticeResponse] = {}
 _understandings: dict[str, DisruptionUnderstanding] = {}
 _decisions: dict[str, HumanDecision] = {}
+_case_stages: dict[str, list[tuple[str, datetime]]] = {}
+_case_closures: dict[str, CaseClosure] = {}
+
+
+def _record_stage(disruption_id: str, stage: str) -> None:
+    """Record one genuine stage completion with the current server time."""
+
+    if disruption_id not in _case_stages:
+        _case_stages[disruption_id] = []
+    recorded = [entry for entry in _case_stages[disruption_id] if entry[0] == stage]
+    if not recorded:
+        _case_stages[disruption_id].append((stage, datetime.now(timezone.utc)))
 
 
 def normalize_description(description: str) -> str:
@@ -80,6 +95,8 @@ def clear_disruptions() -> None:
     _disruptions.clear()
     _understandings.clear()
     _decisions.clear()
+    _case_stages.clear()
+    _case_closures.clear()
 
 
 @router.post("", response_model=DisruptionNoticeResponse, status_code=status.HTTP_201_CREATED)
@@ -124,6 +141,7 @@ def understand_disruption(disruption_id: str) -> DisruptionUnderstandingResponse
     except GeminiExtractionError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     _understandings[disruption_id] = understanding
+    _record_stage(disruption_id, "understanding")
     return DisruptionUnderstandingResponse(
         disruption_id=record.disruption_id,
         original_description=record.original_description,
@@ -140,6 +158,7 @@ def match_disruption(disruption_id: str) -> MatchingResponse:
     understanding = _understandings.get(disruption_id)
     if understanding is None:
         raise HTTPException(status_code=409, detail="Disruption understanding is not available")
+    _record_stage(disruption_id, "matching")
     return match_understanding(disruption_id, understanding, load_sample_data())
 
 
@@ -154,7 +173,9 @@ def analyze_disruption_impact(disruption_id: str) -> ImpactResponse:
         raise HTTPException(status_code=409, detail="Disruption understanding is not available")
     data = load_sample_data()
     matching = match_understanding(disruption_id, understanding, data)
-    return analyze_impact(disruption_id, matching, data)
+    impact = analyze_impact(disruption_id, matching, data)
+    _record_stage(disruption_id, "impact")
+    return impact
 
 
 @router.post("/{disruption_id}/priorities", response_model=PrioritizationResponse)
@@ -170,6 +191,7 @@ def prioritize_disruption_orders(disruption_id: str) -> PrioritizationResponse:
     data = load_sample_data()
     matching = match_understanding(disruption_id, understanding, data)
     impact = analyze_impact(disruption_id, matching, data)
+    _record_stage(disruption_id, "priorities")
     return prioritize_orders(record.reported_at.date(), impact, data)
 
 
@@ -187,6 +209,7 @@ def recommend_disruption_actions(disruption_id: str) -> ActionPlanResponse:
     matching = match_understanding(disruption_id, understanding, data)
     impact = analyze_impact(disruption_id, matching, data)
     priorities = prioritize_orders(record.reported_at.date(), impact, data)
+    _record_stage(disruption_id, "recommendations")
     return build_action_plan(impact, priorities)
 
 
@@ -202,6 +225,7 @@ def analyze_disruption_analytics(disruption_id: str) -> OperationalAnalyticsResp
     data = load_sample_data()
     matching = match_understanding(disruption_id, understanding, data)
     impact = analyze_impact(disruption_id, matching, data)
+    _record_stage(disruption_id, "analytics")
     return build_operational_analytics(disruption_id, impact, data)
 
 
@@ -217,6 +241,7 @@ def shipment_movement_evidence(disruption_id: str) -> ShipmentMovementResponse:
     data = load_sample_data()
     matching = match_understanding(disruption_id, understanding, data)
     impact = analyze_impact(disruption_id, matching, data)
+    _record_stage(disruption_id, "movement")
     return build_shipment_movement(disruption_id, impact, data)
 
 
@@ -253,7 +278,9 @@ def coordinate_disruption_response(disruption_id: str) -> ResponseCoordinationRe
     """Return deterministic reviewer roles, decision requirements, and the human decision gate."""
 
     impact, priorities, plan, data = _coordination_context(disruption_id)
-    return build_response_coordination(disruption_id, impact, priorities, plan, data, decided=_decisions)
+    coordination = build_response_coordination(disruption_id, impact, priorities, plan, data, decided=_decisions)
+    _record_stage(disruption_id, "coordination")
+    return coordination
 
 
 @router.post("/{disruption_id}/scenarios", response_model=ScenarioComparisonResponse)
@@ -261,7 +288,9 @@ def simulate_disruption_scenarios(disruption_id: str) -> ScenarioComparisonRespo
     """Return a deterministic comparison of supported what-if scenarios without executing anything."""
 
     impact, priorities, plan, data = _coordination_context(disruption_id)
-    return build_scenario_comparison(disruption_id, impact, priorities, plan, data)
+    response = build_scenario_comparison(disruption_id, impact, priorities, plan, data)
+    _record_stage(disruption_id, "scenarios")
+    return response
 
 
 @router.post("/{disruption_id}/decision", response_model=HumanDecision)
@@ -297,4 +326,110 @@ def record_disruption_decision(disruption_id: str, decision: DecisionRequest) ->
         recorded_at=datetime.now(timezone.utc),
     )
     _decisions[requirement.decision_id] = recorded
+    _record_stage(disruption_id, "coordination")
     return recorded
+
+
+class CloseCaseRequest(BaseModel):
+    """A human operator case-close record that never executes an action."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reviewer_role: str | None = None
+    note: str | None = None
+
+
+@router.get("/{disruption_id}/case", response_model=CaseStatusResponse)
+def get_disruption_case(disruption_id: str) -> CaseStatusResponse:
+    """Return the truthful case lifecycle, decision audit, and investigation timeline."""
+
+    record = _disruptions.get(disruption_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Disruption not found: {disruption_id}")
+    understanding = _understandings.get(disruption_id)
+    coordination = None
+    impact = None
+    priorities = None
+    plan = None
+    if understanding is not None:
+        data = load_sample_data()
+        matching = match_understanding(disruption_id, understanding, data)
+        impact = analyze_impact(disruption_id, matching, data)
+        priorities = prioritize_orders(record.reported_at.date(), impact, data)
+        plan = build_action_plan(impact, priorities)
+        coordination = build_response_coordination(
+            disruption_id, impact, priorities, plan, data, decided=_decisions
+        )
+    return build_case_status(
+        disruption_id=disruption_id,
+        reported_at=record.reported_at,
+        understanding=understanding,
+        coordination=coordination,
+        impact=impact,
+        priorities=priorities,
+        plan=plan,
+        stages=list(_case_stages.get(disruption_id, [])),
+        decided=_decisions,
+        closure=_case_closures.get(disruption_id),
+    )
+
+
+@router.post("/{disruption_id}/close", response_model=CaseStatusResponse)
+def close_disruption_case(disruption_id: str, close: CloseCaseRequest) -> CaseStatusResponse:
+    """Close a fully reviewed case; the system records the close and executes nothing."""
+
+    record = _disruptions.get(disruption_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Disruption not found: {disruption_id}")
+    understanding = _understandings.get(disruption_id)
+    if understanding is None:
+        raise HTTPException(status_code=409, detail="Disruption understanding is not available")
+    if disruption_id in _case_closures:
+        raise HTTPException(status_code=422, detail="Case is already closed")
+    data = load_sample_data()
+    matching = match_understanding(disruption_id, understanding, data)
+    impact = analyze_impact(disruption_id, matching, data)
+    priorities = prioritize_orders(record.reported_at.date(), impact, data)
+    plan = build_action_plan(impact, priorities)
+    coordination = build_response_coordination(
+        disruption_id, impact, priorities, plan, data, decided=_decisions
+    )
+    requirements = coordination.decision_requirements
+    recorded_ids = {
+        requirement.decision_id
+        for requirement in requirements
+        if (entry := _decisions.get(requirement.decision_id)) is not None and entry.status == "recorded"
+    }
+    pending_ids = [requirement.decision_id for requirement in requirements if requirement.decision_id not in recorded_ids]
+    if pending_ids:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Pending decisions must be recorded first: {', '.join(pending_ids)}",
+        )
+    if close.reviewer_role is not None:
+        known_roles = {role.role_id for role in coordination.roles} | {
+            role.name for role in coordination.roles
+        }
+        if close.reviewer_role not in known_roles:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Reviewer role must be one of the assigned coordination roles: {', '.join(sorted(known_roles))}",
+            )
+    _case_closures[disruption_id] = CaseClosure(
+        disruption_id=disruption_id,
+        closed_at=datetime.now(timezone.utc),
+        reviewer_role=close.reviewer_role,
+        note=close.note,
+    )
+    return build_case_status(
+        disruption_id=disruption_id,
+        reported_at=record.reported_at,
+        understanding=understanding,
+        coordination=coordination,
+        impact=impact,
+        priorities=priorities,
+        plan=plan,
+        stages=list(_case_stages.get(disruption_id, [])),
+        decided=_decisions,
+        closure=_case_closures[disruption_id],
+    )
