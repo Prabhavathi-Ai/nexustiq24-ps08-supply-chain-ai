@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from analysis.analytics import build_operational_analytics
-from analysis.case import build_case_status
+from analysis.case import DECISION_TYPE_ROLE, build_case_status
 from analysis.coordination import build_response_coordination
 from analysis.impact import analyze_impact
 from analysis.models import (
@@ -309,12 +309,28 @@ def record_disruption_decision(disruption_id: str, decision: DecisionRequest) ->
             status_code=422,
             detail=f"Selected option must be one of: {', '.join(allowed_options)}",
         )
-    known_roles = {role.role_id for role in coordination.roles} | {role.name for role in coordination.roles}
-    if decision.reviewer_role is not None and decision.reviewer_role not in known_roles:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Reviewer role must be one of the assigned coordination roles: {', '.join(sorted(known_roles))}",
+    if decision.reviewer_role is not None:
+        assigned_role_id = DECISION_TYPE_ROLE.get(requirement.decision_type)
+        assigned_role = next(
+            (role for role in coordination.roles if role.role_id == assigned_role_id),
+            None,
         )
+        allowed_roles = {
+            candidate
+            for candidate in (
+                assigned_role.role_id if assigned_role is not None else None,
+                assigned_role.name if assigned_role is not None else None,
+            )
+            if candidate is not None
+        }
+        if decision.reviewer_role not in allowed_roles:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Reviewer role is not the role assigned to this decision requirement. "
+                    f"Assigned: {assigned_role.name if assigned_role is not None else 'none'}"
+                ),
+            )
     recorded = HumanDecision(
         decision_id=requirement.decision_id,
         status="recorded",

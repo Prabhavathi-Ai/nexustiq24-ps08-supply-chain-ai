@@ -155,7 +155,7 @@
       <div class="summary-grid" id="kpis"></div>
       <div class="section-label">Active exceptions</div>
       <div id="exceptions-list"></div>
-      <div class="section-label">Your decisions</div>
+      <div class="section-label">My Decision Inbox</div>
       <div id="my-decisions"></div>
       <div class="section-label">Recent cases</div>
       <div id="recent-cases"></div>
@@ -179,6 +179,7 @@
     (function () {
       const ESCAPE = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
       const list = values => values && values.length ? values.map(ESCAPE).join(', ') : 'Not stated';
+      const truncate = (value, max) => { const text = String(value ?? ''); return text.length > max ? `${text.slice(0, max - 1)}\u2026` : text; };
       const request = async (url, options) => { const response = await fetch(url, options); const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(body.detail || 'Request failed'); return body; };
 
       const ROLES = {
@@ -349,16 +350,44 @@
         return reqs.length > 0 && reqs.every(req => cs.decisions[req.decision_id] && cs.decisions[req.decision_id].status === 'recorded');
       };
 
-      const decisionCardHTML = (req, index, recorded, mineRole, isCoordinator) => {
+      const decisionDetailHTML = (data, req, roleId, recorded) => {
+        const role = (data.coordination.roles || []).find(candidate => candidate.role_id === roleId);
+        const orders = role && role.related_order_ids ? role.related_order_ids : [];
+        const shipments = role && role.related_shipment_ids ? role.related_shipment_ids : [];
+        const evidenceCount = (req.evidence_references || []).length;
+        const happened = data.disruption ? `<p><b>What happened:</b> ${ESCAPE(data.disruption.original_description)}</p>` : '';
+        const why = role && role.reason ? `<p><b>Why this decision is required:</b> ${ESCAPE(role.reason)}</p>` : '';
+        const tradeOffs = [];
+        if (req.decision_type === 'approve-recommended-action' && data.actionPlan) {
+          const recommended = (data.actionPlan.options || []).find(option => option.option_id === data.actionPlan.recommended_option_id);
+          if (recommended && recommended.trade_offs && recommended.trade_offs.length) tradeOffs.push(`| Trade-offs: ${recommended.trade_offs.map(ESCAPE).join('; ')}`);
+          if (recommended && recommended.risks && recommended.risks.length) tradeOffs.push(`| Risks: ${recommended.risks.map(ESCAPE).join('; ')}`);
+          if (data.actionPlan.why && data.actionPlan.why.length) tradeOffs.push(`| Why now: ${data.actionPlan.why.map(ESCAPE).join(' ')}`);
+        }
+        const scenario = data.scenarios && data.scenarios.recommended_scenario_id
+          ? `<p><b>Scenario information:</b> ${ESCAPE(data.scenarios.comparison_note)} (${data.scenarios.scenarios.length} simulated scenario${data.scenarios.scenarios.length === 1 ? '' : 's'}; recommended scenario included).</p>`
+          : '';
+        return `<details class="detail-toggle"><summary>Review decision detail &amp; evidence</summary><div class="detail-body">${happened}${why}<p><b>Required decision:</b> ${ESCAPE(req.question)}</p><p><b>Current status:</b> ${recorded && recorded.status === 'recorded' ? 'Recorded \u2014 not executed' : 'Pending human decision'}</p><div class="priority-meta">Affected orders: ${list(orders)} \u00b7 Affected shipments: ${list(shipments)} \u00b7 Evidence references: ${evidenceCount}</div>${tradeOffs.join('')}${scenario}${evidenceRefs(req.evidence_references)}</div></details>`;
+      };
+
+      const decisionCardHTML = (data, req, index, recorded, mineRole, isCoordinator) => {
         const roleId = DECISION_ROLE[req.decision_type] || 'operations_manager';
         const isMine = isCoordinator || roleId === mineRole;
+        const isConsultative = !isMine && !isCoordinator;
         const options = [req.recommended_option, ...(req.alternative_options || [])];
-        const pill = recorded && recorded.status === 'recorded' ? '<span class="dec-pill recorded">Recorded</span>' : '<span class="dec-pill pending">Pending</span>';
-        const roleLabel = `<div class="priority-meta">Assigned role: ${ESCAPE(ROLE_DISPLAY[roleId] || roleId)} | Recommended: ${ESCAPE(req.recommended_option)}</div>`;
+        const pill = recorded && recorded.status === 'recorded' ? '<span class="dec-pill recorded">Recorded \u2014 not executed</span>' : '<span class="dec-pill pending">Decision required</span>';
+        const roleLabel = `<div class="priority-meta">Assigned role: ${ESCAPE(ROLE_DISPLAY[roleId] || roleId)} \u00b7 Recommended: ${ESCAPE(req.recommended_option)}</div>`;
+        const stateLine = recorded && recorded.status === 'recorded'
+          ? '<p class="priority-meta"><b>Decision recorded</b> \u2014 awaiting no further action on this requirement, and nothing was executed.</p>'
+          : isConsultative
+            ? '<p class="priority-meta">Assigned to another role \u2014 review only in this demo session; recording is limited to the assigned stakeholder.</p>'
+            : '<p class="priority-meta"><b>Decision required from a human</b> \u2014 the system recommends only; this requirement stays open until it is recorded.</p>';
         const controls = recorded && recorded.status === 'recorded'
-          ? `<p class="priority-meta">Selected: ${ESCAPE(recorded.selected_option)}${recorded.reviewer_role ? ` \u00b7 Reviewer: ${ESCAPE(recorded.reviewer_role)}` : ''}${recorded.recorded_at ? ` \u00b7 Recorded ${ESCAPE(recorded.recorded_at)}` : ''}</p><p class="data-note">Decision recorded \u2014 not executed. No message was sent and no operational action was taken.</p>`
-          : `<label for="coordination-select-${index}">Human decision</label><select id="coordination-select-${index}" class="draft">${options.map(option => `<option value="${ESCAPE(option)}">${ESCAPE(option)}</option>`).join('')}</select><button type="button" class="link-button" data-record="${index}">Record Human Decision</button><div id="coordination-outcome-${index}" class="status"></div>`;
-        return `<div class="decision-card${isMine ? ' mine' : ''}">${roleLabel}${isMine ? '<span class="status-badge">YOUR DECISION</span>' : ''} ${pill}<strong>${ESCAPE(req.question)}</strong><small>${(req.rationale || []).map(ESCAPE).join(' ')}</small>${stateLine}${controls}${evidenceRefs(req.evidence_references)}</div>`;
+          ? `<p class="priority-meta">Selected: ${ESCAPE(recorded.selected_option)}${recorded.reviewer_role ? ` \u00b7 Reviewer: ${ESCAPE(recorded.reviewer_role)}` : ''}${recorded.recorded_at ? ` \u00b7 Recorded ${ESCAPE(recorded.recorded_at)}` : ''}</p><p class="data-note">Execution status: not executed. No message was sent and no operational action was taken.</p>`
+          : isConsultative
+            ? '<p class="data-note">Review-only \u2014 switch to the assigned role to record this decision (demo stakeholder handoff).</p>'
+            : `<label for="coordination-select-${index}">Human decision</label><select id="coordination-select-${index}" class="draft">${options.map(option => `<option value="${ESCAPE(option)}">${ESCAPE(option)}</option>`).join('')}</select><label for="coordination-note-${index}">Optional review note</label><input type="text" id="coordination-note-${index}" class="draft" maxlength="500" placeholder="Optional note from the reviewer"><button type="button" class="link-button" data-record="${index}">Record Human Decision</button><div id="coordination-outcome-${index}" class="status"></div>`;
+        return `<div class="decision-card${isMine ? ' mine' : ''}">${roleLabel}${isMine ? '<span class="status-badge">YOUR DECISION</span>' : ''} ${pill}<strong>${ESCAPE(req.question)}</strong><small>${(req.rationale || []).map(ESCAPE).join(' ')}</small>${stateLine}${controls}${evidenceRefs(req.evidence_references)}${decisionDetailHTML(data, req, roleId, recorded)}</div>`;
       };
 
       const stepDecision = data => {
@@ -369,7 +398,7 @@
         const pending = reqs.length - recCount;
         const mineRole = ROLES[session.role].coordinationRole;
         const isCoordinator = session.role === 'operations_manager';
-        const cards = reqs.map((req, index) => decisionCardHTML(req, index, cs.decisions[req.decision_id], mineRole, isCoordinator)).join('');
+        const cards = reqs.map((req, index) => decisionCardHTML(data, req, index, cs.decisions[req.decision_id], mineRole, isCoordinator)).join('');
         const roleList = (coordination.roles || []).map(role => `<div class="impact-item"><strong>${ESCAPE(role.name)}</strong> <span class="priority-meta">priority ${role.priority}</span><br>${ESCAPE(role.responsibility)}<br><small><b>Why:</b> ${ESCAPE(role.reason)}</small><div class="priority-meta">Orders: ${list(role.related_order_ids)} \u00b7 Shipments: ${list(role.related_shipment_ids)}</div></div>`).join('');
         const statusBlock = reqs.length
           ? (pending === 0
@@ -442,10 +471,13 @@
         if (currentStep === 4 && data.coordination) {
           const reqs = data.coordination.decision_requirements || [];
           const recCount = reqs.filter(req => cs.decisions[req.decision_id] && cs.decisions[req.decision_id].status === 'recorded').length;
+          const roleNote = session.role === 'operations_manager'
+            ? 'You coordinate every assignment in this demo session.'
+            : 'In this role you may record only the decisions assigned to you; the rest are review-only. Switch roles to record the others.';
           guide = !reqs.length
             ? 'No human decision is required for this case.'
             : recCount < reqs.length
-              ? `${reqs.length - recCount} of ${reqs.length} required decisions still await their assigned reviewer. Record them below to close the case; the system will not act without them.`
+              ? `${reqs.length - recCount} of ${reqs.length} required decisions still await their assigned reviewer. ${roleNote} Record them below to close the case; the system will not act without them.`
               : 'All required decisions have been recorded. The case is complete and nothing was executed automatically.';
         } else {
           guide = STEP_GUIDES[currentStep] || 'Proceed to the next stage of the investigation.';
@@ -571,12 +603,15 @@
         if (!requirement) return;
         const select = el(`coordination-select-${index}`);
         const outcome = el(`coordination-outcome-${index}`);
+        const noteInput = el(`coordination-note-${index}`);
         const button = document.querySelector(`[data-record="${index}"]`);
         const selected = select ? select.value : requirement.recommended_option;
+        const reviewerRole = ROLES[session.role].coordinationRole;
+        const reviewNote = noteInput && noteInput.value && noteInput.value.trim() ? noteInput.value.trim() : null;
         if (button) { button.disabled = true; button.textContent = 'Recording...'; }
         if (outcome) { outcome.textContent = 'Recording decision...'; outcome.className = 'status'; }
         try {
-          const recorded = await request(`/api/disruptions/${data.disruption.disruption_id}/decision`, { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ decision_id: requirement.decision_id, selected_option: selected, reviewer_role: null, note: null }) });
+          const recorded = await request(`/api/disruptions/${data.disruption.disruption_id}/decision`, { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ decision_id: requirement.decision_id, selected_option: selected, reviewer_role: reviewerRole, note: reviewNote }) });
           if (!recorded || recorded.status !== 'recorded') throw new Error('The decision was not recorded.');
           cs.decisions[requirement.decision_id] = recorded;
           session.lastRecordNote = `Decision recorded \u2014 not executed. Selected: ${recorded.selected_option}.`;
@@ -628,21 +663,40 @@
 
       const renderMyDecisions = () => {
         const host = el('my-decisions');
-        const cs = Object.values(CASES).find(candidate => forData(candidate.key) && forData(candidate.key).coordination && forData(candidate.key).coordination.coordination_state !== 'no_response_coordination_required');
-        if (!cs) { host.innerHTML = '<p class="data-note">No decisions assigned yet. Investigate an exception to begin.</p>'; return; }
-        const data = forData(cs.key);
+        const isOps = session.role === 'operations_manager';
         const mineRole = ROLES[session.role].coordinationRole;
-        const rows = data.coordination.decision_requirements.map(req => {
-          const roleId = DECISION_ROLE[req.decision_type] || 'operations_manager';
-          if (session.role !== 'operations_manager' && roleId !== mineRole) return '';
-          const recorded = cs.decisions[req.decision_id];
-const pill = recorded && recorded.status === 'recorded' ? '<span class="dec-pill recorded">Recorded \u2014 not executed</span>' : '<span class="dec-pill pending">Decision required</span>';
-        const stateLine = recorded && recorded.status === 'recorded'
-          ? '<p class="priority-meta"><b>Decision recorded</b> \u2014 awaiting no further action on this requirement, and nothing was executed.</p>'
-          : '<p class="priority-meta"><b>Decision required from a human</b> \u2014 the system recommends only; this requirement stays open until it is recorded.</p>';
-          return `<div class="case-card"><div>${pill}<h2>${ESCAPE(req.question)}</h2><p>Assigned role: ${ESCAPE(ROLE_DISPLAY[roleId] || roleId)} \u00b7 Recommended: ${ESCAPE(req.recommended_option)}</p></div><button type="button" class="link-button" data-action="open" data-case="${cs.key}" data-step="4">Review decision</button></div>`;
-        }).join('');
-        host.innerHTML = rows || `<p class="data-note">${session.role === 'operations_manager' ? 'You coordinate all decisions. Open an exception to review them.' : 'No decisions are currently assigned to this role.'}</p>`;
+        const cards = [];
+        const progressNotes = [];
+        let hasAssigned = false;
+        let hasNoDecisionCase = false;
+        Object.values(CASES).forEach(cs => {
+          const data = forData(cs.key);
+          if (!data || !data.coordination) return;
+          const reqs = data.coordination.decision_requirements || [];
+          if (data.coordination.coordination_state === 'no_response_coordination_required' || !reqs.length) { hasNoDecisionCase = true; return; }
+          const recCount = reqs.filter(req => cs.decisions[req.decision_id] && cs.decisions[req.decision_id].status === 'recorded').length;
+          const visible = reqs.filter(req => {
+            const roleId = DECISION_ROLE[req.decision_type] || 'operations_manager';
+            return isOps || roleId === mineRole;
+          });
+          if (!visible.length) return;
+          hasAssigned = true;
+          progressNotes.push(`<div class="priority-meta"><b>${ESCAPE(cs.name)}</b> \u00b7 ${recCount} of ${reqs.length} decisions recorded${recCount === reqs.length ? ' \u00b7 All human decisions recorded \u2014 case ready to close' : ` \u00b7 ${reqs.length - recCount} pending`}</div>`);
+          visible.forEach(req => {
+            const roleId = DECISION_ROLE[req.decision_type] || 'operations_manager';
+            const recorded = cs.decisions[req.decision_id];
+            const pill = recorded && recorded.status === 'recorded' ? '<span class="dec-pill recorded">Recorded \u2014 not executed</span>' : '<span class="dec-pill pending">Decision required</span>';
+            const evidenceCount = (req.evidence_references || []).length;
+            const needsHuman = !recorded || recorded.status !== 'recorded';
+            const cta = needsHuman ? 'Review &amp; decide' : 'Review decision';
+            cards.push(`<div class="case-card"><div>${pill}<h2>${ESCAPE(cs.name)}</h2><p><b>${ESCAPE(req.question)}</b></p><p>Assigned role: ${ESCAPE(ROLE_DISPLAY[roleId] || roleId)} \u00b7 Status: ${needsHuman ? 'Human decision still required' : 'Recorded'}</p><p>Recommended: ${ESCAPE(truncate(req.recommended_option, 110))}</p><p class="data-note">Evidence references: ${evidenceCount}${recorded && recorded.selected_option ? ` \u00b7 Selected: ${ESCAPE(truncate(recorded.selected_option, 80))}` : ''}${recorded && recorded.reviewer_role ? ` \u00b7 Reviewer: ${ESCAPE(recorded.reviewer_role)}` : ''}${recorded && recorded.recorded_at ? ` \u00b7 Decided ${ESCAPE(recorded.recorded_at)}` : ''}</p></div><button type="button" class="link-button" data-action="open" data-case="${cs.key}" data-step="4">${cta}</button></div>`);
+          });
+        });
+        const progressBlock = progressNotes.length ? `<div class="priority-list">${progressNotes.join('')}</div>` : '';
+        const empty = !hasAssigned && hasNoDecisionCase
+          ? '<p class="data-note">No decisions are required. No-impact cases create no stakeholder assignments, so nothing appears here.</p>'
+          : (!hasAssigned ? '<p class="data-note">No decisions are assigned to the current role yet. Investigate an exception to begin.</p>' : '');
+        host.innerHTML = `<div class="priority-meta">Demo role session \u2014 role switching simulates stakeholder handoff; there is no real authentication. Operations Manager sees every assignment; other roles see only the decisions assigned to them.</div>${progressBlock}${cards.join('') || empty}`;
       };
 
       const renderCaseHistory = () => {
