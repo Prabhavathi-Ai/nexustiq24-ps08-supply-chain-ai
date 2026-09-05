@@ -37,6 +37,11 @@ from services.data_loader import load_sample_data
 
 MAX_DESCRIPTION_LENGTH = 5_000
 
+CLOSE_AUTHORIZED_SESSION_ROLES = {
+    "operations_manager",
+    "Operations Manager",
+}
+
 
 class DisruptionNoticeRequest(BaseModel):
     """Validated input received from a user-provided disruption notice."""
@@ -289,7 +294,8 @@ def simulate_disruption_scenarios(disruption_id: str) -> ScenarioComparisonRespo
 
     impact, priorities, plan, data = _coordination_context(disruption_id)
     response = build_scenario_comparison(disruption_id, impact, priorities, plan, data)
-    _record_stage(disruption_id, "scenarios")
+    if response.scenarios:
+        _record_stage(disruption_id, "scenarios")
     return response
 
 
@@ -303,6 +309,14 @@ def record_disruption_decision(disruption_id: str, decision: DecisionRequest) ->
     requirement = requirements.get(decision.decision_id)
     if requirement is None:
         raise HTTPException(status_code=422, detail=f"Unknown decision requirement: {decision.decision_id}")
+    if _decisions.get(requirement.decision_id) is not None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Decision {requirement.decision_id} has already been recorded; "
+                "the original decision and audit entry are preserved and cannot be overwritten."
+            ),
+        )
     allowed_options = [requirement.recommended_option, *requirement.alternative_options]
     if decision.selected_option not in allowed_options:
         raise HTTPException(
@@ -423,9 +437,12 @@ def close_disruption_case(disruption_id: str, close: CloseCaseRequest) -> CaseSt
             detail=f"Pending decisions must be recorded first: {', '.join(pending_ids)}",
         )
     if close.reviewer_role is not None:
-        known_roles = {role.role_id for role in coordination.roles} | {
-            role.name for role in coordination.roles
-        }
+        known_roles = (
+            {role.role_id for role in coordination.roles}
+            | {role.name for role in coordination.roles}
+            | set(DECISION_TYPE_ROLE.values())
+            | CLOSE_AUTHORIZED_SESSION_ROLES
+        )
         if close.reviewer_role not in known_roles:
             raise HTTPException(
                 status_code=422,

@@ -361,6 +361,47 @@ class CoordinationApiTests(unittest.TestCase):
         self.assertEqual(decision["reviewer_role"], "Supply Chain Planner")
         self.assertEqual(decision["note"], "Approved by the assigned planner.")
 
+    def test_repeated_decision_recording_is_rejected_and_original_preserved(self) -> None:
+        disruption_id = self.seed_understanding(
+            "Heavy flooding near Vellore.", DisruptionUnderstanding(locations=["Vellore"])
+        )
+        _, coordination = self.request("POST", f"/api/disruptions/{disruption_id}/coordination")
+        requirement = coordination["decision_requirements"][0]
+        first_body = {
+            "decision_id": requirement["decision_id"],
+            "selected_option": requirement["recommended_option"],
+            "reviewer_role": "Supply Chain Planner",
+            "note": "First decision.",
+        }
+        status_code, first = self.request(
+            "POST", f"/api/disruptions/{disruption_id}/decision", first_body
+        )
+        self.assertEqual(status_code, 200)
+        self.assertEqual(first["status"], "recorded")
+
+        second_body = {
+            "decision_id": requirement["decision_id"],
+            "selected_option": requirement["alternative_options"][0],
+            "reviewer_role": "Supply Chain Planner",
+            "note": "Second attempt.",
+        }
+        status_code, second_payload = self.request(
+            "POST", f"/api/disruptions/{disruption_id}/decision", second_body
+        )
+        self.assertEqual(status_code, 422)
+        self.assertIn("already been recorded", second_payload["detail"])
+
+        _, case = self.request("GET", f"/api/disruptions/{disruption_id}/case")
+        audit = next(
+            entry for entry in case["decision_audit"]
+            if entry["decision_id"] == requirement["decision_id"]
+        )
+        self.assertEqual(audit["decision_status"], "recorded")
+        self.assertEqual(audit["selected_option"], requirement["recommended_option"])
+        self.assertEqual(audit["reviewer_role"], "Supply Chain Planner")
+        self.assertEqual(audit["review_note"], "First decision.")
+        self.assertEqual(audit["decided_at"], first["recorded_at"])
+
     def test_no_impact_kandla_coordination_flow(self) -> None:
         disruption_id = self.seed_understanding(
             "Severe flooding near Kandla.",

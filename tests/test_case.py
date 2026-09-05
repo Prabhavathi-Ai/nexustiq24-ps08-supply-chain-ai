@@ -451,6 +451,49 @@ class CaseApiTests(unittest.TestCase):
         self.assertEqual(status_code, 200)
         self.assertEqual(payload["lifecycle_state"], "closed")
 
+    def test_close_records_operations_manager_role(self) -> None:
+        disruption_id = self.seed_understanding(
+            "Heavy flooding near Vellore.", DisruptionUnderstanding(locations=["Vellore"])
+        )
+        coordination = self.advance_to_coordination(disruption_id)
+        self.record_all_decisions(disruption_id, coordination)
+        status_code, payload = self.request(
+            "POST",
+            f"/api/disruptions/{disruption_id}/close",
+            {"reviewer_role": "Operations Manager", "note": "Closed by the operations manager."},
+        )
+        self.assertEqual(status_code, 200)
+        self.assertEqual(payload["lifecycle_state"], "closed")
+        self.assertEqual(payload["close"]["reviewer_role"], "Operations Manager")
+        status_code, payload = self.request("GET", f"/api/disruptions/{disruption_id}/case")
+        self.assertEqual(status_code, 200)
+        self.assertEqual(payload["close"]["reviewer_role"], "Operations Manager")
+        self.assertEqual(payload["timeline"][-1]["stage"], "close")
+        self.assertIn("by Operations Manager", payload["timeline"][-1]["label"])
+
+    def test_close_accepts_session_role_ids(self) -> None:
+        disruption_id = self.seed_understanding(
+            "Heavy flooding near Vellore.", DisruptionUnderstanding(locations=["Vellore"])
+        )
+        coordination = self.advance_to_coordination(disruption_id)
+        self.record_all_decisions(disruption_id, coordination)
+        status_code, payload = self.request(
+            "POST", f"/api/disruptions/{disruption_id}/close", {"reviewer_role": "operations_manager"}
+        )
+        self.assertEqual(status_code, 200)
+        self.assertEqual(payload["close"]["reviewer_role"], "operations_manager")
+
+    def test_close_accepts_session_role_for_no_action_case(self) -> None:
+        disruption_id = self.seed_understanding(
+            "Port delays near Kandla.", DisruptionUnderstanding(locations=["Kandla"])
+        )
+        status_code, payload = self.request(
+            "POST", f"/api/disruptions/{disruption_id}/close", {"reviewer_role": "Operations Manager"}
+        )
+        self.assertEqual(status_code, 200)
+        self.assertEqual(payload["lifecycle_state"], "closed")
+        self.assertEqual(payload["close"]["reviewer_role"], "Operations Manager")
+
     def test_second_close_is_rejected(self) -> None:
         disruption_id = self.seed_understanding(
             "Heavy flooding near Vellore.", DisruptionUnderstanding(locations=["Vellore"])

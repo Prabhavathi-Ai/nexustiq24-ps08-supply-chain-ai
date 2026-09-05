@@ -152,6 +152,7 @@
         <div><div class="eyebrow">Operations workspace</div><h1>Supply Chain Control Tower</h1><p>From signal to evidence-backed review. <b>Current role:</b> <span id="tower-role">&mdash;</span> <button id="switch-role" class="link-button" type="button" data-action="roles">Switch role</button></p></div>
         <button id="report-disruption" class="link-button" type="button" data-action="report">Report a disruption</button>
       </div>
+      <div id="tower-guide"></div>
       <div class="summary-grid" id="kpis"></div>
       <div class="section-label">Active exceptions</div>
       <div id="exceptions-list"></div>
@@ -180,7 +181,7 @@
       const ESCAPE = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
       const list = values => values && values.length ? values.map(ESCAPE).join(', ') : 'Not stated';
       const truncate = (value, max) => { const text = String(value ?? ''); return text.length > max ? `${text.slice(0, max - 1)}\u2026` : text; };
-      const request = async (url, options) => { const response = await fetch(url, options); const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(body.detail || 'Request failed'); return body; };
+      const request = async (url, options) => { const response = await fetch(url, options); const body = await response.json().catch(() => ({})); if (!response.ok) { const detail = body.detail; const message = Array.isArray(detail) ? 'The disruption request could not be validated. Please check the input and try again.' : (detail || 'Request failed'); throw new Error(message); } return body; };
 
       const ROLES = {
         operations_manager: { name: 'Operations Manager', coordinationRole: null },
@@ -530,7 +531,7 @@
         if (!data) return;
         setStatus('Closing case...');
         try {
-          const result = await request(`/api/disruptions/${data.disruption.disruption_id}/close`, { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ reviewer_role: null, note: null }) });
+          const result = await request(`/api/disruptions/${data.disruption.disruption_id}/close`, { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ reviewer_role: ROLES[session.role].name, note: null }) });
           cs.caseStatus = result;
           cs.status = 'closed';
           renderCompletion();
@@ -695,7 +696,7 @@
         const progressBlock = progressNotes.length ? `<div class="priority-list">${progressNotes.join('')}</div>` : '';
         const empty = !hasAssigned && hasNoDecisionCase
           ? '<p class="data-note">No decisions are required. No-impact cases create no stakeholder assignments, so nothing appears here.</p>'
-          : (!hasAssigned ? '<p class="data-note">No decisions are assigned to the current role yet. Investigate an exception to begin.</p>' : '');
+          : (!hasAssigned ? '<p class="data-note">No decisions are assigned to the current role yet. Report a disruption or open the Vellore demo to start a case.</p>' : '');
         host.innerHTML = `<div class="priority-meta">Demo role session \u2014 role switching simulates stakeholder handoff; there is no real authentication. Operations Manager sees every assignment; other roles see only the decisions assigned to them.</div>${progressBlock}${cards.join('') || empty}`;
       };
 
@@ -710,9 +711,17 @@
         host.innerHTML = rows || '<p class="data-note">No cases created yet.</p>';
       };
 
+      const renderTowerGuide = () => {
+        const host = el('tower-guide');
+        const anyInvestigated = Object.values(CASES).some(cs => Boolean(forData(cs.key)));
+        if (anyInvestigated) { host.innerHTML = ''; return; }
+        host.innerHTML = '<div class="guide"><b>Start with a disruption notice</b><p>This control tower turns an unstructured disruption notice into a traceable investigation: which operational records are affected, which orders to prioritize, what response options exist, and which human decisions are required. The system recommends; humans decide; nothing executes automatically.</p><p><b>What to do next:</b> report a disruption notice, or run the built-in Vellore demo to see the full journey.</p><p><button type="button" data-action="report">Report a Disruption</button> <button type="button" data-action="demo-vellore" class="link-button">Try Vellore Demo</button></p></div>';
+      };
+
       const renderTower = () => {
         el('tower-role').textContent = ROLES[session.role].name;
         el('header-role').textContent = ROLES[session.role].name;
+        renderTowerGuide();
         renderKpis();
         el('exceptions-list').innerHTML = Object.values(CASES).map(caseCardHTML).join('');
         renderMyDecisions();
@@ -769,6 +778,7 @@
         if (action === 'roles') { showScreen('screen-role'); }
         else if (action === 'tower') { renderTower(); }
         else if (action === 'report') { openCase(reportCase()); }
+        else if (action === 'demo-vellore') { openCase('vellore'); }
         else if (action === 'open') { openCase(target.getAttribute('data-case'), target.getAttribute('data-step') !== null ? Number(target.getAttribute('data-step')) : undefined); }
         else if (action === 'close') { closeCase(); }
         else if (action === 'back') { renderStep(Math.max(0, session.step - 1)); }

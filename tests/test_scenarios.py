@@ -205,6 +205,34 @@ class ScenarioApiTests(unittest.TestCase):
         self.assertEqual(payload["simulation_state"], "no_scenario_created")
         self.assertEqual(payload["scenarios"], [])
 
+    def test_no_impact_scenarios_call_does_not_record_scenario_stage(self) -> None:
+        disruption_id = self.seed_understanding(
+            "Port delays near Kandla.", DisruptionUnderstanding(locations=["Kandla"])
+        )
+        _, before = self.request("GET", f"/api/disruptions/{disruption_id}/case")
+        stages_before = [entry["stage"] for entry in before["timeline"]]
+
+        status_code, payload = self.request("POST", f"/api/disruptions/{disruption_id}/scenarios")
+        self.assertEqual(status_code, 200)
+        self.assertEqual(payload["simulation_state"], "no_scenario_created")
+        self.assertEqual(payload["scenarios"], [])
+
+        _, after = self.request("GET", f"/api/disruptions/{disruption_id}/case")
+        stages_after = [entry["stage"] for entry in after["timeline"]]
+        self.assertEqual(stages_after, stages_before)
+        self.assertNotIn("scenarios", stages_after)
+
+    def test_affected_scenarios_call_records_scenario_stage(self) -> None:
+        disruption_id = self.seed_understanding(
+            "Heavy flooding near Vellore.", DisruptionUnderstanding(locations=["Vellore"])
+        )
+        status_code, payload = self.request("POST", f"/api/disruptions/{disruption_id}/scenarios")
+        self.assertEqual(status_code, 200)
+        self.assertEqual(payload["simulation_state"], "scenario_comparison_available")
+        _, case = self.request("GET", f"/api/disruptions/{disruption_id}/case")
+        stages = [entry["stage"] for entry in case["timeline"]]
+        self.assertIn("scenarios", stages)
+
     def test_scenarios_endpoint_unknown_id_returns_404(self) -> None:
         status_code, payload = self.request("POST", "/api/disruptions/DIS-UNKNOWN/scenarios")
         self.assertEqual(status_code, 404)
